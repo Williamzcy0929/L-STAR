@@ -256,7 +256,7 @@ If you use L-STAR in your research, please cite:
 
 ```bibtex
 @software{lstar,
-  title={L-STAR: LLM-guided Spatial Transcriptomics Analysis and Ranking},
+  title={L-STAR: LLM-Guided Spatial Domain Detection},
   author={Changyue Zhao, Zhicheng Ji},
   year={2025},
   url={https://github.com/Williamzcy0929/L-STAR}

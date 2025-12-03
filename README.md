@@ -273,6 +273,6 @@ Contributions are welcome! Please open an issue or submit a pull request.
 
 ## Contact
 
-Authors: Changyue (William) Zhao ([changyue (dot) zhao (at) duke (dot) edu](mailto:changyue.zhao@duke.edu)) and Dr. Zhicheng Ji ([zhicheng (dot) ji (at) duke (dot) edu](mailto:zhicheng.ji@duke.edu]))
+Authors: Changyue (William) Zhao ([mailto:changyue.zhao@duke.edu]) and Dr. Zhicheng Ji ([mailto:zhicheng.ji@duke.edu]])
 
 For questions and issues, please open an issue on GitHub or [send an email to the maintainer](mailto:changyue.zhao@duke.edu).

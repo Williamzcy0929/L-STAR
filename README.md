@@ -12,11 +12,7 @@ The L-STAR pipeline consists of two main stages:
 
 ## Installation
 
-```bash
-pip install lstar
-```
-
-Or install from source:
+Install from source (this Repo):
 
 ```bash
 git clone https://github.com/yourusername/lstar.git

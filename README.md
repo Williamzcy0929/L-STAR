@@ -31,7 +31,7 @@ import lstar
 
 # Run the full L-STAR pipeline
 df = lstar.l_star(
-    image_dir="path/to/images",           # Directory with H&E and model output images
+    image_dir="path/to/images",           # Directory with model output images and the optional H&E image
     assignments_dir="path/to/assignments", # Directory with per-model assignment CSVs
     model_names=["Model1", "Model2", "Model3", "Model4", "Model5"],
     fixed_k=7,                             # Fixed number of clusters

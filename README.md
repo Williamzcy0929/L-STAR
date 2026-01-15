@@ -19,6 +19,10 @@ git clone https://github.com/Williamzcy0929/lstar.git
 cd lstar
 pip install -e .
 ```
+OR
+```
+pip install "git+https://github.com/Williamzcy0929/L-STAR.git"
+```
 
 ## Quick Start
 

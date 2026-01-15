@@ -9,27 +9,30 @@ import pandas as pd
 from lstar.pairwise import run_pairwise_comparisons
 from lstar.consensus import run_consensus_clustering
 from lstar.config import DEFAULT_OUTPUT_DIR
+from lstar.io_utils import read_second_round_results
 
 logger = logging.getLogger(__name__)
 
 
 def l_star(
     image_dir: Union[str, Path],
+    dataset_name: str,
     *,
-    combined_assignments_csv: Union[str, Path, None] = None,
-    id_col: str = "spot_id",
+    assignments_csv: Union[str, Path, None] = None,
+    id_col: Optional[str] = None,
     use_separate_csvs: bool = False,
     assignments_dir: Union[str, Path, None] = None,
-    assignment_csvs: Optional[Sequence[Union[str, Path]]] = None,
+    assignment_csv_list: Optional[Sequence[Union[str, Path]]] = None,
     output_dir: Union[str, Path] = DEFAULT_OUTPUT_DIR,
     simple_mode: bool = True,
     reps: int = 5,
     top_k: int = 5,
     top_k_mode: Literal["fixed", "elbow"] = "fixed",
-    selection_mode: Literal["manual", "top_k"] = "manual",
+    selection_mode: Literal["manual", "top_k"] = "top_k",
     model_names: Sequence[str] | None = None,
     k_mode: Literal["fixed", "auto"] = "auto",
     fixed_k: Optional[int] = None,
+    use_second_round: bool = False,
     **kwargs,
 ) -> pd.DataFrame:
     """
@@ -45,25 +48,31 @@ def l_star(
     image_dir : str or Path
         Directory containing H&E and model output images
     
-    combined_assignments_csv : str or Path, optional
+    dataset_name : str
+        Background information about the dataset name provided in LLM prompts.
+        This helps the LLM understand the context of the spatial transcriptomics data.
+        Example: "DLPFC (from 10X Visium Human Brain)" or "STARmap Mouse Ventricular Cardiomyocytes"
+    
+    assignments_csv : str or Path, optional
         Path to a single CSV file containing all model assignments (one column per model).
         This is the default mode. If not provided and use_separate_csvs=False, will raise an error.
         When using this mode, fuzzy name matching is automatically enabled to match
         model names between ranking CSV, assignment columns, and image filenames.
     
-    id_col : str, default "spot_id"
-        Name of the ID column in combined_assignments_csv (only used in combined CSV mode)
+    id_col : str, optional
+        Name of the ID column in assignments_csv (only used in combined CSV mode).
+        Required when assignments_csv is provided.
     
     use_separate_csvs : bool, default False
         If True, use the legacy mode with separate CSV files per model (one CSV per model).
-        Requires either assignments_dir or assignment_csvs to be provided.
-        If False (default), uses combined_assignments_csv mode.
+        Requires either assignments_dir or assignment_csv_list to be provided.
+        If False (default), uses assignments_csv mode.
     
     assignments_dir : str or Path, optional
         Directory containing per-model clustering assignment CSVs.
         Only used if use_separate_csvs=True.
     
-    assignment_csvs : sequence of paths, optional
+    assignment_csv_list : sequence of paths, optional
         Explicit list of per-model clustering assignment CSVs.
         Only used if use_separate_csvs=True.
     
@@ -88,8 +97,14 @@ def l_star(
     
     selection_mode : {"manual", "top_k"}
         How to select models for consensus:
-        - "manual": Use model_names parameter (default)
-        - "top_k": Select top k models from ranking by win_rate
+        - "manual": Use model_names parameter
+        - "top_k": Select top k models from ranking by win_rate (default)
+    
+    use_second_round : bool, default False
+        If True, read second-round reasoning JSON file (if present) and use its selected models for consensus.
+        When enabled, second-round results override the default top-k selection
+        (unless selection_mode="manual" with explicit model_names).
+        Note: Second-round reasoning is performed by the separate second_round.py module, not within l_star.
     
     model_names : sequence of str, optional
         Manually specified list of model names for consensus clustering.
@@ -105,9 +120,10 @@ def l_star(
         Additional arguments passed to run_pairwise_comparisons and run_consensus_clustering:
         - api_key, api_base, model_name
         - pairwise_temperature, pairwise_reasoning_effort
-        - second_round_temperature, second_round_reasoning_effort
-        - use_second_round, dataset_name
         - k_method, k_range, ground_truth_col, etc.
+        
+        Note: Second-round reasoning parameters (second_round_temperature, second_round_reasoning_effort)
+        are handled by the separate second_round.py module, not by run_pairwise_comparisons.
     
     Returns
     -------
@@ -121,7 +137,8 @@ def l_star(
     >>> # Example 1: Default mode (combined CSV with fuzzy matching)
     >>> df = lstar.l_star(
     ...     image_dir="path/to/images",
-    ...     combined_assignments_csv="path/to/combined_assignments.csv",
+    ...     dataset_name="DLPFC (from 10X Visium Human Brain)",
+    ...     assignments_csv="path/to/combined_assignments.csv",
     ...     id_col="spot_id",
     ...     selection_mode="top_k",
     ...     top_k=5,
@@ -132,6 +149,7 @@ def l_star(
     >>> # Example 2: Legacy mode (separate CSV files per model)
     >>> df = lstar.l_star(
     ...     image_dir="path/to/images",
+    ...     dataset_name="DLPFC (from 10X Visium Human Brain)",
     ...     use_separate_csvs=True,
     ...     assignments_dir="path/to/assignments",
     ...     model_names=["Model1", "Model2", "Model3"],
@@ -151,6 +169,7 @@ def l_star(
     # Extract kwargs for pairwise and consensus
     pairwise_kwargs = {
         "image_dir": image_dir,
+        "dataset_name": dataset_name,
         "reps": reps,
         "top_k": top_k,
         "top_k_mode": top_k_mode,
@@ -161,28 +180,24 @@ def l_star(
         "model_name": kwargs.pop("model_name", "gpt-5.1-thinking"),
         "pairwise_temperature": kwargs.pop("pairwise_temperature", 1.0),
         "pairwise_reasoning_effort": kwargs.pop("pairwise_reasoning_effort", "medium"),
-        "second_round_temperature": kwargs.pop("second_round_temperature", 1.0),
-        "second_round_reasoning_effort": kwargs.pop("second_round_reasoning_effort", "high"),
         "api_key": kwargs.pop("api_key", None),
         "api_base": kwargs.pop("api_base", None),
-        "use_second_round": kwargs.pop("use_second_round", True),
-        "dataset_name": kwargs.pop("dataset_name", "the dataset"),
+        "disable_cache": kwargs.pop("disable_cache", False),
     }
     
+    # Build initial consensus_kwargs (will be updated after pairwise phase)
     consensus_kwargs = {
         "output_dir": output_dir,
-        "selection_mode": selection_mode,
-        "model_names": model_names,
-        "top_k": top_k if selection_mode == "top_k" else None,
+        "selection_mode": selection_mode,  # Will be updated based on priority
+        "model_names": model_names,  # Will be updated based on priority
+        "top_k": top_k,  # Will be updated based on priority
         "k_mode": k_mode,
         "fixed_k": fixed_k,
         "k_method": kwargs.pop("k_method", "median_from_models"),
         "k_range": kwargs.pop("k_range", range(2, 16)),
         "ground_truth_col": kwargs.pop("ground_truth_col", None),
-        "reps": kwargs.pop("reps", 5),
         "random_state": kwargs.pop("random_state", 0),
-        "dataset_name": kwargs.pop("dataset_name", None),
-        "combined_assignments_csv": combined_assignments_csv,
+        "assignments_csv": assignments_csv,
         "id_col": id_col,
         "use_separate_csvs": use_separate_csvs,
     }
@@ -193,21 +208,26 @@ def l_star(
         if assignments_dir is not None:
             consensus_kwargs["assignments_dir"] = assignments_dir
             logger.info(f"Using separate CSV files from directory: {assignments_dir}")
-        elif assignment_csvs is not None:
-            consensus_kwargs["assignment_csvs"] = assignment_csvs
-            logger.info(f"Using separate CSV files: {len(assignment_csvs)} files")
+        elif assignment_csv_list is not None:
+            consensus_kwargs["assignment_csv_list"] = assignment_csv_list
+            logger.info(f"Using separate CSV files: {len(assignment_csv_list)} files")
         else:
             raise ValueError(
-                "When use_separate_csvs=True, either assignments_dir or assignment_csvs must be provided."
+                "When use_separate_csvs=True, either assignments_dir or assignment_csv_list must be provided."
             )
     else:
         # Default mode: combined CSV
-        if combined_assignments_csv is None:
+        if assignments_csv is None:
             raise ValueError(
-                "combined_assignments_csv must be provided when use_separate_csvs=False (default mode). "
-                "Either provide combined_assignments_csv, or set use_separate_csvs=True to use separate CSV files."
+                "assignments_csv must be provided when use_separate_csvs=False (default mode). "
+                "Either provide assignments_csv, or set use_separate_csvs=True to use separate CSV files."
             )
-        logger.info(f"Using combined assignments CSV: {combined_assignments_csv}")
+        if id_col is None:
+            raise ValueError(
+                "id_col must be provided when using assignments_csv mode. "
+                "Specify the name of the ID column in the combined assignments CSV."
+            )
+        logger.info(f"Using combined assignments CSV: {assignments_csv}")
     
     # Warn about unused kwargs
     if kwargs:
@@ -221,6 +241,43 @@ def l_star(
     ranking_df, pairwise_dir, ranking_csv_path = run_pairwise_comparisons(**pairwise_kwargs)
     
     logger.info(f"Pairwise comparisons complete. Ranking CSV: {ranking_csv_path}")
+    
+    # Determine model selection based on priority: manual > second-round JSON > top-k
+    # Priority 1: Manual override (explicit by user)
+    if selection_mode == "manual" and model_names is not None and len(model_names) > 0:
+        logger.info(f"Using manual model selection: {model_names}")
+        final_selection_mode = "manual"
+        final_model_names = model_names
+        final_top_k = None
+    
+    # Priority 2: Second-round reasoning JSON (when requested and present)
+    elif use_second_round:
+        # Do not run the second round inside l_star (second-round is a separate script/module)
+        # Instead, assume the separate second-round script has already written a JSON file
+        second_round_models = read_second_round_results(output_dir)
+        if second_round_models is not None and len(second_round_models) > 0:
+            logger.info(f"Using second-round reasoning selected models from JSON: {second_round_models}")
+            final_selection_mode = "manual"
+            final_model_names = second_round_models
+            final_top_k = None
+        else:
+            logger.warning("Second-round reasoning enabled but no valid JSON found, falling back to default top-k selection")
+            # Fall through to Priority 3 (top-k)
+            final_selection_mode = "top_k"
+            final_model_names = None
+            final_top_k = top_k
+    
+    # Priority 3: Default: top-k winning-rate models (no second round)
+    else:
+        final_selection_mode = "top_k"
+        final_model_names = None
+        final_top_k = top_k
+        logger.info(f"Using default top-k selection: top_k={final_top_k}")
+    
+    # Update consensus_kwargs with final selection
+    consensus_kwargs["selection_mode"] = final_selection_mode
+    consensus_kwargs["model_names"] = final_model_names
+    consensus_kwargs["top_k"] = final_top_k if final_selection_mode == "top_k" else None
     
     # Step 2: Run consensus clustering
     logger.info("\n" + "=" * 60)

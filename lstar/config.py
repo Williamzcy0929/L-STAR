@@ -1,7 +1,7 @@
 """Default configuration and constants for L-STAR."""
 
 # Default LLM model
-DEFAULT_MODEL_NAME = "gpt-5.1-2025-11-13"
+DEFAULT_MODEL_NAME = "gpt-5-2025-08-07"
 
 # Default hyperparameters for pairwise comparisons
 DEFAULT_PAIRWISE_TEMPERATURE = 1.0

@@ -313,11 +313,11 @@ def perform_eac_consensus(
 def run_consensus_clustering(
     ranking_csv: Union[str, Path],
     *,
-    combined_assignments_csv: Union[str, Path, None] = None,
-    id_col: str = "spot_id",
+    assignments_csv: Union[str, Path, None] = None,
+    id_col: Optional[str] = None,
     use_separate_csvs: bool = False,
     assignments_dir: Union[str, Path, None] = None,
-    assignment_csvs: Optional[Sequence[Union[str, Path]]] = None,
+    assignment_csv_list: Optional[Sequence[Union[str, Path]]] = None,
     output_csv: Union[str, Path, None] = None,
     output_dir: Union[str, Path] = DEFAULT_OUTPUT_DIR,
     model_names: Sequence[str] | None = None,
@@ -328,9 +328,7 @@ def run_consensus_clustering(
     k_mode: Literal["fixed", "auto"] = "auto",
     fixed_k: Optional[int] = None,
     ground_truth_col: Optional[str] = None,
-    reps: int = 5,
     random_state: Optional[int] = 0,
-    dataset_name: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Run consensus clustering over selected models and produce the L-STAR assignment.
@@ -340,24 +338,25 @@ def run_consensus_clustering(
     ranking_csv : str or Path
         Path to ranking CSV with model names and win rates
     
-    combined_assignments_csv : str or Path, optional
+    assignments_csv : str or Path, optional
         Path to a single CSV file containing all model assignments (one column per model).
         This is the default mode. If not provided and use_separate_csvs=False, will raise an error.
         When using this mode, fuzzy name matching is automatically enabled.
     
-    id_col : str, default "spot_id"
-        Name of the ID column in combined_assignments_csv (only used in combined CSV mode)
+    id_col : str, optional
+        Name of the ID column in assignments_csv (only used in combined CSV mode).
+        Required when assignments_csv is provided.
     
     use_separate_csvs : bool, default False
         If True, use the legacy mode with separate CSV files per model (one CSV per model).
-        Requires either assignments_dir or assignment_csvs to be provided.
-        If False (default), uses combined_assignments_csv mode.
+        Requires either assignments_dir or assignment_csv_list to be provided.
+        If False (default), uses assignments_csv mode.
     
     assignments_dir : str or Path, optional
         Directory containing per-model assignment CSVs (one CSV per model).
         Only used if use_separate_csvs=True.
     
-    assignment_csvs : sequence of paths, optional
+    assignment_csv_list : sequence of paths, optional
         Explicit list of per-model assignment CSV paths.
         Only used if use_separate_csvs=True.
     
@@ -474,16 +473,21 @@ def run_consensus_clustering(
         # Default mode: combined CSV
         use_combined_csv = True
         use_fuzzy_matching = True
-        if combined_assignments_csv is None:
+        if assignments_csv is None:
             raise ValueError(
-                "combined_assignments_csv must be provided when use_separate_csvs=False (default mode). "
-                "Either provide combined_assignments_csv, or set use_separate_csvs=True to use separate CSV files."
+                "assignments_csv must be provided when use_separate_csvs=False (default mode). "
+                "Either provide assignments_csv, or set use_separate_csvs=True to use separate CSV files."
+            )
+        if id_col is None:
+            raise ValueError(
+                "id_col must be provided when using assignments_csv mode. "
+                "Specify the name of the ID column in the combined assignments CSV."
             )
     
     # Load assignment data
     if use_combined_csv:
         # NEW MODE: Combined CSV with fuzzy matching
-        combined_csv_path = Path(combined_assignments_csv)
+        combined_csv_path = Path(assignments_csv)
         combined_df, assignment_normalized_map = read_combined_assignments_csv(
             combined_csv_path, id_col=id_col
         )
@@ -504,6 +508,7 @@ def run_consensus_clustering(
             image_map={},  # Images not needed for consensus clustering
             ranking_csv_path=ranking_csv,
             combined_csv_path=combined_csv_path,
+            require_images=False,  # Images are not required for consensus clustering
         )
         
         # Get ID values from combined CSV
@@ -526,8 +531,8 @@ def run_consensus_clustering(
         
     else:
         # EXISTING MODE: Separate CSV files per model (unchanged behavior)
-        if assignment_csvs is not None:
-            assignment_paths = [Path(p) for p in assignment_csvs]
+        if assignment_csv_list is not None:
+            assignment_paths = [Path(p) for p in assignment_csv_list]
             assignment_dfs = read_assignment_csvs(assignment_paths, model_names=selected_models)
         elif assignments_dir is not None:
             assignment_paths_dict = find_assignment_csvs(Path(assignments_dir), selected_models)
@@ -535,7 +540,7 @@ def run_consensus_clustering(
             assignment_dfs = read_assignment_csvs(assignment_paths, model_names=selected_models)
         else:
             raise ValueError(
-                "Either assignments_dir, assignment_csvs, or combined_assignments_csv must be provided. "
+                "Either assignments_dir, assignment_csv_list, or assignments_csv must be provided. "
                 "Specify the directory containing assignment CSVs, a list of CSV paths, or a combined CSV file."
             )
         
@@ -635,11 +640,14 @@ def run_consensus_clustering(
     consensus_result = perform_eac_consensus(label_mat, k_optimal, ground_truth)
     consensus_labels = consensus_result['consensus_labels']
     
-    # Build output DataFrame
+    # Build output DataFrame with proper column order: [id_col, "L-STAR"]
     consensus_df = pd.DataFrame({
         id_col: id_values,
         "L-STAR": consensus_labels,
     })
+    
+    # Ensure column order: id_col first, then L-STAR
+    consensus_df = consensus_df[[id_col, "L-STAR"]]
     
     # Write output CSV
     if output_csv is None:

@@ -15,13 +15,12 @@ import hashlib
 
 import pandas as pd
 from openai import OpenAI
+from tqdm import tqdm
 
 from lstar.config import (
     DEFAULT_MODEL_NAME,
     DEFAULT_PAIRWISE_TEMPERATURE,
     DEFAULT_PAIRWISE_REASONING_EFFORT,
-    DEFAULT_SECOND_ROUND_TEMPERATURE,
-    DEFAULT_SECOND_ROUND_REASONING_EFFORT,
     DEFAULT_OUTPUT_DIR,
     PAIRWISE_SUBDIR,
     RANKING_CSV_NAME,
@@ -37,7 +36,7 @@ logger = logging.getLogger(__name__)
 def file_to_data_url(path: Path) -> str:
     """Convert image file to data URL.
     
-    Supports multiple formats: png, jpg, jpeg, pdf
+    Supports multiple formats: png, jpg, jpeg
     """
     if not path.exists():
         raise FileNotFoundError(f"Image not found: {path}")
@@ -47,8 +46,6 @@ def file_to_data_url(path: Path) -> str:
         mime = "image/png"
     elif path_lower.endswith((".jpg", ".jpeg")):
         mime = "image/jpeg"
-    elif path_lower.endswith(".pdf"):
-        mime = "application/pdf"
     else:
         # Default to jpeg for unknown extensions
         mime = "image/jpeg"
@@ -77,44 +74,51 @@ def discover_models(
     if not img_dir.is_dir():
         raise NotADirectoryError(f"Image directory not found: {image_dir}")
     
+    # Supported image extensions (same for H&E and model images)
+    image_extensions = [".png", ".jpg", ".jpeg"]
+    
     # Try to find H&E image with different extensions
-    he_basename_path = Path(he_basename)
-    he_name_without_ext = he_basename_path.stem
     he_path = None
+    he_basename_str = str(he_basename)
     
-    # Try common image extensions
-    for ext in [".png", ".jpg", ".jpeg", ".pdf"]:
-        candidate = img_dir / f"{he_name_without_ext}{ext}"
-        if candidate.exists():
-            he_path = candidate
-            logger.info(f"Found H&E image: {he_path}")
-            break
-    
-    if he_path is None:
-        # Also try the exact basename as provided (for backward compatibility)
-        candidate = img_dir / he_basename
+    if "." in he_basename_str:
+        # Treat as a full filename with extension
+        candidate = img_dir / he_basename_str
         if candidate.exists():
             he_path = candidate
             logger.info(f"Found H&E image: {he_path}")
         else:
-            logger.warning(f"H&E image not found at {img_dir / he_basename} (tried .png, .jpg, .jpeg, .pdf), will proceed without it")
+            logger.warning(f"H&E image not found at {candidate}, will proceed without it")
+    else:
+        # Treat as basename without extension; try multiple extensions
+        for ext in image_extensions:
+            candidate = img_dir / f"{he_basename_str}{ext}"
+            if candidate.exists():
+                he_path = candidate
+                logger.info(f"Found H&E image: {he_path}")
+                break
+        
+        if he_path is None:
+            logger.warning(
+                f"H&E image not found for basename '{he_basename_str}' "
+                f"with supported extensions: {image_extensions}; will proceed without it"
+            )
     
-    model_images = {}
-    # Support multiple image formats: png, jpg, jpeg, pdf
-    image_extensions = ["*.png", "*.jpg", "*.jpeg", "*.pdf"]
+    # Discover model images
+    model_images: Dict[str, Path] = {}
     for ext in image_extensions:
-        for img_file in img_dir.glob(ext):
-            # Check if this is the H&E image (try with different extensions)
-            he_name_without_ext = Path(he_basename).stem
-            if img_file.stem == he_name_without_ext:
+        for img_file in img_dir.glob(f"*{ext}"):
+            # Skip the H&E image by comparing full path resolution
+            if he_path is not None and img_file.resolve() == he_path.resolve():
                 continue
+            
             model_id = img_file.stem
             # If we already found this model with a different extension, skip
-            # (prioritize png > jpg/jpeg > pdf)
+            # (prioritize png > jpg/jpeg)
             if model_id in model_images:
                 existing_ext = model_images[model_id].suffix.lower()
                 current_ext = img_file.suffix.lower()
-                priority = {".png": 0, ".jpg": 1, ".jpeg": 1, ".pdf": 2}
+                priority = {".png": 0, ".jpg": 1, ".jpeg": 1}
                 if priority.get(current_ext, 99) >= priority.get(existing_ext, 99):
                     continue
             model_images[model_id] = img_file
@@ -400,13 +404,30 @@ def run_single_pairwise_comparison(
     dataset_name: str,
     cache_path: Optional[Path] = None,
     force_rerun: bool = False,
+    disable_cache: bool = False,
+    in_memory_cache: Optional[Dict[str, dict]] = None,
 ) -> dict:
     """Run a single pairwise comparison, using cache if available."""
-    # Check cache
-    if cache_path and not force_rerun:
+    # Check in-memory cache first
+    if in_memory_cache is not None and not force_rerun:
+        cache_key = get_pairwise_cache_key(
+            model1_id, model2_id, rep, simple_mode,
+            model_name, temperature, reasoning_effort
+        )
+        if cache_key in in_memory_cache:
+            return in_memory_cache[cache_key]
+    
+    # Check file cache (only if not disabled)
+    if cache_path and not disable_cache and not force_rerun:
         cached = get_cached_pairwise_result(cache_path)
         if cached is not None:
-            logger.info(f"Using cached result for {model1_id} vs {model2_id} (rep {rep})")
+            # Store in in-memory cache if available
+            if in_memory_cache is not None:
+                cache_key = get_pairwise_cache_key(
+                    model1_id, model2_id, rep, simple_mode,
+                    model_name, temperature, reasoning_effort
+                )
+                in_memory_cache[cache_key] = cached
             return cached
     
     # Run LLM call
@@ -423,8 +444,16 @@ def run_single_pairwise_comparison(
         "repetition": rep,
     }
     
-    # Cache result
-    if cache_path:
+    # Store in in-memory cache if available
+    if in_memory_cache is not None:
+        cache_key = get_pairwise_cache_key(
+            model1_id, model2_id, rep, simple_mode,
+            model_name, temperature, reasoning_effort
+        )
+        in_memory_cache[cache_key] = result
+    
+    # Cache result to file (only if not disabled)
+    if cache_path and not disable_cache:
         cache_pairwise_result(cache_path, result)
     
     return result
@@ -590,6 +619,7 @@ def select_top_models(
 
 def run_pairwise_comparisons(
     image_dir: Union[str, Path],
+    dataset_name: str,
     *,
     reps: int = DEFAULT_REPS,
     top_k: int = DEFAULT_TOP_K,
@@ -602,20 +632,75 @@ def run_pairwise_comparisons(
     model_name: str = DEFAULT_MODEL_NAME,
     pairwise_temperature: float = DEFAULT_PAIRWISE_TEMPERATURE,
     pairwise_reasoning_effort: Literal["minimal", "medium", "high"] = DEFAULT_PAIRWISE_REASONING_EFFORT,
-    second_round_temperature: float = DEFAULT_SECOND_ROUND_TEMPERATURE,
-    second_round_reasoning_effort: Literal["minimal", "medium", "high"] = DEFAULT_SECOND_ROUND_REASONING_EFFORT,
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
-    use_second_round: bool = True,
-    dataset_name: str = "the dataset",
+    disable_cache: bool = False,
 ) -> Tuple[pd.DataFrame, Path, Path]:
     """
-    Run LLM-based pairwise comparisons (and second-round reasoning if enabled).
+    Run LLM-based pairwise comparisons to rank models.
     
-    Returns:
-        ranking_df: DataFrame version of the ranking CSV
-        pairwise_dir: Directory where pairwise JSON/JSONL files are written
-        ranking_csv_path: Path to the ranking CSV file
+    Parameters
+    ----------
+    image_dir : str or Path
+        Directory containing H&E and model output images
+    
+    dataset_name : str
+        Background information about the dataset name provided in LLM prompts.
+        This helps the LLM understand the context of the spatial transcriptomics data.
+        Example: "DLPFC (from 10X Visium Human Brain)" or "STARmap Mouse Ventricular Cardiomyocytes"
+    
+    reps : int
+        Number of pairwise comparison repetitions
+    
+    top_k : int
+        Number of top models to consider (used for ranking)
+    
+    top_k_mode : {"fixed", "elbow"}
+        Mode for top-k selection in ranking
+    
+    he_basename : str
+        Basename of H&E image file
+    
+    skip_pairwise : bool
+        If True, skip pairwise comparisons and reuse existing ranking
+    
+    simple_mode : bool
+        If True, use simple prompts for pairwise comparisons
+    
+    output_dir : str or Path
+        Output directory for pairwise results and ranking CSV
+    
+    force_rerun : bool
+        If True, ignore cache and recompute all comparisons
+    
+    model_name : str
+        LLM model name to use
+    
+    pairwise_temperature : float
+        Temperature for pairwise LLM calls
+    
+    pairwise_reasoning_effort : {"minimal", "medium", "high"}
+        Reasoning effort level for pairwise comparisons
+    
+    api_key : str, optional
+        OpenAI API key (or set OPENAI_API_KEY environment variable)
+    
+    api_base : str, optional
+        Custom API base URL
+    
+    disable_cache : bool, default False
+        If True, disable writing individual cache JSON files.
+        Results will still be written to JSONL files, but individual
+        cache_{hash}.json files will not be created.
+    
+    Returns
+    -------
+    ranking_df : pd.DataFrame
+        DataFrame version of the ranking CSV
+    pairwise_dir : Path
+        Directory where pairwise JSON/JSONL files are written
+    ranking_csv_path : Path
+        Path to the ranking CSV file
     """
     image_dir = Path(image_dir)
     output_dir = Path(output_dir)
@@ -655,6 +740,20 @@ def run_pairwise_comparisons(
     pairwise_dir.mkdir(parents=True, exist_ok=True)
     jsonl_files = []
     
+    # In-memory cache to avoid repeated file I/O
+    # Always use in-memory cache for performance, even when file cache is enabled
+    in_memory_cache: Dict[str, dict] = {}
+    
+    # Overall progress bar for all repetitions
+    total_comparisons = reps * len(pairs)
+    overall_pbar = tqdm(
+        total=total_comparisons,
+        desc="Pairwise Comparisons",
+        unit="comparison",
+        position=0,
+        leave=True
+    )
+    
     for rep in range(1, reps + 1):
         logger.info(f"\n=== Repetition {rep}/{reps} ===")
         
@@ -662,15 +761,24 @@ def run_pairwise_comparisons(
         if force_rerun and jsonl_path.exists():
             jsonl_path.unlink()
         
+        # Progress bar for current repetition
+        rep_pbar = tqdm(
+            total=len(pairs),
+            desc=f"Round {rep}/{reps}",
+            unit="pair",
+            position=1,
+            leave=False
+        )
+        
         for idx, (model1_id, model2_id) in enumerate(pairs, start=1):
-            logger.info(f"[Rep {rep}, Pair {idx}/{len(pairs)}] {model1_id} vs {model2_id}")
-            
-            # Generate cache path
-            cache_key = get_pairwise_cache_key(
-                model1_id, model2_id, rep, simple_mode,
-                model_name, pairwise_temperature, pairwise_reasoning_effort
-            )
-            cache_path = pairwise_dir / f"cache_{cache_key}.json"
+            # Generate cache path (only if not disabled)
+            cache_path = None
+            if not disable_cache:
+                cache_key = get_pairwise_cache_key(
+                    model1_id, model2_id, rep, simple_mode,
+                    model_name, pairwise_temperature, pairwise_reasoning_effort
+                )
+                cache_path = pairwise_dir / f"cache_{cache_key}.json"
             
             img1_url = model_urls[model1_id]
             img2_url = model_urls[model2_id]
@@ -679,12 +787,17 @@ def run_pairwise_comparisons(
                 result = run_single_pairwise_comparison(
                     client, he_url, model1_id, model2_id, img1_url, img2_url,
                     rep, simple_mode, model_name, pairwise_temperature,
-                    pairwise_reasoning_effort, dataset_name, cache_path, force_rerun
+                    pairwise_reasoning_effort, dataset_name, cache_path, force_rerun,
+                    disable_cache, in_memory_cache
                 )
                 
                 # Append to JSONL
                 append_jsonl(jsonl_path, result)
-                logger.debug(f"Logged JSONL row for {model1_id} vs {model2_id}")
+                
+                # Update progress bars
+                rep_pbar.set_postfix({"current": f"{model1_id} vs {model2_id}"})
+                rep_pbar.update(1)
+                overall_pbar.update(1)
                 
             except Exception as e:
                 logger.error(f"Error in pairwise comparison {model1_id} vs {model2_id}: {e}")
@@ -697,9 +810,14 @@ def run_pairwise_comparisons(
                     "repetition": rep,
                 }
                 append_jsonl(jsonl_path, err_row)
+                rep_pbar.update(1)
+                overall_pbar.update(1)
         
+        rep_pbar.close()
         jsonl_files.append(jsonl_path)
         logger.info(f"Completed repetition {rep}, saved to: {jsonl_path}")
+    
+    overall_pbar.close()
     
     # Compute winning rates
     ranking_df = compute_winning_rates(jsonl_files, ranking_csv_path)

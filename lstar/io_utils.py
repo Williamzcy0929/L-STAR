@@ -5,7 +5,7 @@ import csv
 import logging
 import re
 from pathlib import Path
-from typing import Optional, Sequence, Dict, Any, Tuple, Union
+from typing import Optional, Sequence, Dict, Any, Tuple, Union, List
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -333,8 +333,8 @@ def build_name_mappings(
     if image_dir is not None:
         image_dir = Path(image_dir)
         if image_dir.is_dir():
-            # Support multiple image formats: png, jpg, jpeg, pdf
-            image_extensions = ["*.png", "*.jpg", "*.jpeg", "*.pdf"]
+            # Support multiple image formats: png, jpg, jpeg
+            image_extensions = ["*.png", "*.jpg", "*.jpeg"]
             for ext in image_extensions:
                 for img_file in image_dir.glob(ext):
                     basename = img_file.stem
@@ -362,6 +362,7 @@ def match_models_with_fuzzy_matching(
     ranking_csv_path: Optional[Path] = None,
     combined_csv_path: Optional[Path] = None,
     image_dir: Optional[Path] = None,
+    require_images: bool = False,
 ) -> Tuple[Dict[str, str], Dict[str, str]]:
     """
     Match selected models from ranking to assignment columns and images using fuzzy matching.
@@ -374,6 +375,8 @@ def match_models_with_fuzzy_matching(
         ranking_csv_path: Optional path for error messages
         combined_csv_path: Optional path for error messages
         image_dir: Optional path for error messages
+        require_images: If True, log warnings when images cannot be matched. If False (default),
+            suppress warnings since images are optional in this context.
     
     Returns:
         Tuple of (model_to_assignment_col, model_to_image) where:
@@ -415,12 +418,69 @@ def match_models_with_fuzzy_matching(
         if norm_name in image_map:
             model_to_image[model_name] = image_map[norm_name]
         else:
-            logger.warning(
-                f"Could not match ranking model '{model_name}' (normalized '{norm_name}') "
-                f"to any image file{image_dir_str}. This is OK if images are not required."
-            )
+            # Only log warning if images are actually required
+            if require_images:
+                logger.warning(
+                    f"Could not match ranking model '{model_name}' (normalized '{norm_name}') "
+                    f"to any image file{image_dir_str}. This is OK if images are not required."
+                )
+            else:
+                # Images are not required, so suppress the warning (use debug level if needed)
+                logger.debug(
+                    f"Could not match ranking model '{model_name}' (normalized '{norm_name}') "
+                    f"to any image file{image_dir_str}. Images are not required in this context."
+                )
     
     return model_to_assignment_col, model_to_image
+
+
+def read_second_round_results(output_dir: Path) -> Optional[List[str]]:
+    """
+    Look for a second-round reasoning JSON file under output_dir (and/or
+    output_dir / 'pairwise'), and return the list of REAL model IDs stored
+    under the 'final_model_ids' key.
+    
+    Returns:
+        A list of model IDs if found and valid, otherwise None.
+    """
+    output_dir = Path(output_dir)
+    second_round_files = []
+    
+    # 1. Search for *_second_round_reasoning.json under:
+    #    - output_dir / "pairwise", then
+    #    - output_dir
+    candidate_dirs = [output_dir / "pairwise", output_dir]
+    
+    for candidate_dir in candidate_dirs:
+        if candidate_dir.exists():
+            found = list(candidate_dir.glob("*second_round*.json"))
+            second_round_files.extend(found)
+    
+    # 2. Choose the most recent matching file (by modification time) if multiple exist
+    if not second_round_files:
+        logger.debug(f"No second-round reasoning JSON found in {output_dir} or {output_dir / 'pairwise'}")
+        return None
+    
+    second_round_file = sorted(second_round_files, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+    
+    # 3. Open it, parse as JSON, and return data.get("final_model_ids") if it is a non-empty list of strings
+    try:
+        with open(second_round_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        final_model_ids = data.get("final_model_ids", [])
+        
+        # 4. If no file found, or parsing fails, or final_model_ids is missing/empty, return None (do not raise)
+        if isinstance(final_model_ids, list) and len(final_model_ids) > 0 and all(isinstance(x, str) for x in final_model_ids):
+            logger.info(f"Read second-round reasoning results from {second_round_file}: {len(final_model_ids)} models selected")
+            return final_model_ids
+        else:
+            logger.warning(f"Second-round JSON {second_round_file} has invalid or empty 'final_model_ids'")
+            return None
+    
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, Exception) as e:
+        logger.warning(f"Could not read second-round reasoning file {second_round_file}: {e}")
+        return None
 
 
 def write_consensus_csv(
@@ -433,6 +493,8 @@ def write_consensus_csv(
 ) -> None:
     """
     Write consensus clustering results to CSV.
+    
+    Ensures column order: [id_column, "L-STAR", <other columns>]
     
     Args:
         output_path: Path to write CSV
@@ -457,6 +519,18 @@ def write_consensus_csv(
         for col in original_df.columns:
             if col not in data and col != "L-STAR":
                 df[col] = original_df[col].values
+    
+    # Reorder columns: [id_column, "L-STAR", <other columns>]
+    columns = list(df.columns)
+    if id_column_name in columns and "L-STAR" in columns:
+        other_cols = [c for c in columns if c not in (id_column_name, "L-STAR")]
+        new_cols = [id_column_name, "L-STAR"] + other_cols
+        df = df[new_cols]
+    elif "L-STAR" in columns:
+        # If no ID column, just ensure L-STAR is first
+        other_cols = [c for c in columns if c != "L-STAR"]
+        new_cols = ["L-STAR"] + other_cols
+        df = df[new_cols]
     
     df.to_csv(output_path, index=False)
     logger.info(f"Wrote consensus CSV: {output_path} ({len(df)} rows)")

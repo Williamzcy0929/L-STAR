@@ -15,7 +15,7 @@ The L-STAR pipeline consists of two main stages:
 Install from source (this Repo):
 
 ```bash
-git clone https://github.com/yourusername/lstar.git
+git clone https://github.com/Williamzcy0929/lstar.git
 cd lstar
 pip install -e .
 ```

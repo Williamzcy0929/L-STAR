@@ -74,26 +74,7 @@ See `scripts/README.md` for detailed installation instructions and troubleshooti
 
 L-STAR supports two modes for spatial visualization:
 
-### Mode 1: Using Pre-generated Images (Original Mode)
-
-```python
-import lstar
-
-# Run the full L-STAR pipeline with pre-generated images
-df = lstar.l_star(
-    image_dir="path/to/images",           # Directory with model output images and the optional H&E image
-    dataset_name="DLPFC (from 10X Visium Human Brain)",
-    assignments_csv="path/to/assignments.csv",  # Combined assignments CSV
-    id_col="spot_id",                     # ID column name
-    fixed_k=7,                             # Fixed number of clusters
-    api_key="your-openai-api-key"          # Or set OPENAI_API_KEY env var
-)
-
-print(df.head())
-# Output includes 'L-STAR' column with consensus cluster labels
-```
-
-### Mode 2: Generate Images from CSV Files (Default with Palo)
+### Mode 1: Generate Images from CSV Files (Default with Palo)
 
 By default, L-STAR can generate spatial visualization images internally from spatial locations and domain assignments, using Palo for color palette optimization:
 
@@ -116,6 +97,27 @@ print(df.head())
 # Generated images are saved to output_dir/generated_images/
 ```
 
+### Mode 2: Using Pre-generated Images
+
+If the visualizations of spatial domains are already generated, L-STAR can also treat them as inputs:
+
+```python
+import lstar
+
+# Run the full L-STAR pipeline with pre-generated images
+df = lstar.l_star(
+    image_dir="path/to/images",           # Directory with model output images and the optional H&E image
+    dataset_name="DLPFC (from 10X Visium Human Brain)",
+    assignments_csv="path/to/assignments.csv",  # Combined assignments CSV
+    id_col="spot_id",                     # ID column name
+    fixed_k=7,                             # Fixed number of clusters
+    api_key="your-openai-api-key"          # Or set OPENAI_API_KEY env var
+)
+
+print(df.head())
+# Output includes 'L-STAR' column with consensus cluster labels
+```
+
 **Key Points:**
 - When `spatial_locations_csv` and `assignments_csv` are provided, images are generated internally
 - Palo is used by default (`use_palo=True`) to optimize colors for spatially neighboring clusters
@@ -126,15 +128,7 @@ print(df.head())
 
 L-STAR supports two input modes:
 
-### Mode 1: Pre-generated Images
-
-The `image_dir` should contain:
-- `he.png` (or custom name with extensions .png, .jpg, .jpeg, or .pdf): H&E reference image (optional)
-- `Model1.png`, `Model2.jpg`, etc.: Clustering visualization images for each model
-  - Supported formats: `.png`, `.jpg`, `.jpeg`, `.pdf`
-  - If multiple formats exist for the same model name, PNG is preferred over JPG/JPEG, which is preferred over PDF
-
-### Mode 2: CSV Files for Image Generation (Default with Palo)
+### Mode 1: CSV Files for Image Generation (Default with Palo)
 
 When generating images internally, provide two CSV files:
 
@@ -149,6 +143,14 @@ spot_2,11.2,21.1
 spot_3,12.0,19.8
 ...
 ```
+
+### Mode 2: Pre-generated Images
+
+The `image_dir` should contain:
+- `he.png` (or custom name with extensions .png, .jpg, .jpeg, or .pdf): H&E reference image (optional)
+- `Model1.png`, `Model2.jpg`, etc.: Clustering visualization images for each model
+  - Supported formats: `.png`, `.jpg`, `.jpeg`, `.pdf`
+  - If multiple formats exist for the same model name, PNG is preferred over JPG/JPEG, which is preferred over PDF
 
 **2. Assignments CSV** (`assignments_csv`):
 - Required columns: `spot_id` (or custom `id_col`), plus one column per method
@@ -174,7 +176,7 @@ spot_3,1,1,1,2
 - Set `use_palo=False` to disable Palo and use default color palettes
 - If Palo is not installed, L-STAR automatically falls back to default colors
 
-### Assignment CSVs (Legacy Mode)
+### Assignment CSVs
 
 For the legacy mode with separate CSV files per model, each model should have a CSV file with clustering assignments. The CSV should contain:
 - An ID column (first column, e.g., `spot_id`, `cell_id`)

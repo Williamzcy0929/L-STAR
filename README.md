@@ -35,7 +35,7 @@ This step filters out systematically underperforming methods while retaining com
 
 The selected top-performing methods are integrated using **Evidence Accumulation Clustering (EAC)**. Pairwise co-assignment frequencies across methods are accumulated into a consensus similarity matrix, which is then clustered to produce a final spatial domain assignment.
 
-The resulting consensus labels are reported as **L-STAR**, representing an ensemble spatial domain detection that leverages both human-interpretable visual judgment (via LLMs) and classical clustering theory. This consensus is subsequently evaluated against ground truth using standard metrics such as ARI and AMI.
+The resulting consensus labels are reported as **L-STAR**, representing an ensemble spatial domain detection that leverages both human-interpretable visual judgment (via LLMs) and classical clustering theory.
 
 ## Installation
 

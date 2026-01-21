@@ -1,4 +1,4 @@
-# L-STAR: LLM-Guided Spatial Domain Detection
+# L-STAR: Visual LLM-Guided Consensus Spatial Domain Detection
 
 L-STAR is a Python package for performing LLM-based pairwise model comparisons and consensus clustering for spatial transcriptomics data. The pipeline uses Large Language Models (LLMs) to evaluate clustering models through pairwise image comparisons, then aggregates the top-performing models using Evidence Accumulation Clustering (EAC) to produce a robust consensus clustering result.
 

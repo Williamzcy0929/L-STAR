@@ -10,14 +10,16 @@ from lstar.pairwise import run_pairwise_comparisons
 from lstar.consensus import run_consensus_clustering
 from lstar.config import DEFAULT_OUTPUT_DIR
 from lstar.io_utils import read_second_round_results
+from lstar.image_generation import generate_images_from_csvs
 
 logger = logging.getLogger(__name__)
 
 
 def l_star(
-    image_dir: Union[str, Path],
-    dataset_name: str,
+    image_dir: Union[str, Path, None] = None,
+    dataset_name: Optional[str] = None,
     *,
+    spatial_locations_csv: Union[str, Path, None] = None,
     assignments_csv: Union[str, Path, None] = None,
     id_col: Optional[str] = None,
     use_separate_csvs: bool = False,
@@ -33,35 +35,58 @@ def l_star(
     k_mode: Literal["fixed", "auto"] = "auto",
     fixed_k: Optional[int] = None,
     use_second_round: bool = False,
+    use_palo: bool = True,
+    he_image_path: Optional[Union[str, Path]] = None,
     **kwargs,
 ) -> pd.DataFrame:
     """
     High-level L-STAR pipeline: pairwise LLM comparisons + ranking + consensus.
     
     This function:
-      1) Runs pairwise LLM comparisons to rank models
-      2) Uses the ranking to select models for consensus clustering
-      3) Performs consensus clustering and outputs L-STAR assignments
+      1) Optionally generates images from spatial locations and assignments (if spatial_locations_csv provided)
+      2) Runs pairwise LLM comparisons to rank models
+      3) Uses the ranking to select models for consensus clustering
+      4) Performs consensus clustering and outputs L-STAR assignments
     
     Parameters
     ----------
-    image_dir : str or Path
-        Directory containing H&E and model output images
-    
     dataset_name : str
         Background information about the dataset name provided in LLM prompts.
         This helps the LLM understand the context of the spatial transcriptomics data.
         Example: "DLPFC (from 10X Visium Human Brain)" or "STARmap Mouse Ventricular Cardiomyocytes"
     
+    image_dir : str or Path, optional
+        Directory containing H&E and model output images.
+        If not provided, images will be generated from spatial_locations_csv and assignments_csv.
+        Either image_dir or (spatial_locations_csv + assignments_csv) must be provided.
+    
+    spatial_locations_csv : str or Path, optional
+        Path to CSV file with spatial coordinates (id_col, x, y).
+        Required when image_dir is not provided. Used to generate images internally.
+        Example columns: spot_id, x, y
+    
     assignments_csv : str or Path, optional
-        Path to a single CSV file containing all model assignments (one column per model).
+        Path to a single CSV file containing all method assignments.
+        Format: The CSV should have one column named `id_col` (e.g., "spot_id") and 
+        all other columns should be named after the spatial domain detection methods
+        (e.g., "GraphST", "SpaGCN", "BayesSpace", etc.). Each method column contains
+        cluster assignments for that method.
+        
+        Example format:
+            spot_id,GraphST,SpaGCN,BayesSpace,STAGATE
+            spot_1,1,2,1,3
+            spot_2,2,2,2,3
+            ...
+        
         This is the default mode. If not provided and use_separate_csvs=False, will raise an error.
         When using this mode, fuzzy name matching is automatically enabled to match
-        model names between ranking CSV, assignment columns, and image filenames.
+        method names between ranking CSV, assignment columns, and image filenames.
+        Required when generating images from CSV files.
     
     id_col : str, optional
-        Name of the ID column in assignments_csv (only used in combined CSV mode).
+        Name of the ID column in assignments_csv and spatial_locations_csv.
         Required when assignments_csv is provided.
+        Default: "spot_id"
     
     use_separate_csvs : bool, default False
         If True, use the legacy mode with separate CSV files per model (one CSV per model).
@@ -106,6 +131,14 @@ def l_star(
         (unless selection_mode="manual" with explicit model_names).
         Note: Second-round reasoning is performed by the separate second_round.py module, not within l_star.
     
+    use_palo : bool, default True
+        Whether to use Palo R package for color palette optimization when generating images.
+        Only used when spatial_locations_csv is provided.
+    
+    he_image_path : str or Path, optional
+        Optional path to H&E image file. If provided and images are generated from CSV,
+        the H&E image will be copied to the generated images directory.
+    
     model_names : sequence of str, optional
         Manually specified list of model names for consensus clustering.
         Required if selection_mode="manual".
@@ -134,7 +167,7 @@ def l_star(
     Examples
     --------
     >>> import lstar
-    >>> # Example 1: Default mode (combined CSV with fuzzy matching)
+    >>> # Example 1: Using pre-generated images (original mode)
     >>> df = lstar.l_star(
     ...     image_dir="path/to/images",
     ...     dataset_name="DLPFC (from 10X Visium Human Brain)",
@@ -146,7 +179,20 @@ def l_star(
     ...     api_key="your-api-key"
     ... )
     >>> 
-    >>> # Example 2: Legacy mode (separate CSV files per model)
+    >>> # Example 2: Generate images from CSV files (new mode)
+    >>> df = lstar.l_star(
+    ...     dataset_name="DLPFC (from 10X Visium Human Brain)",
+    ...     spatial_locations_csv="path/to/spatial_locations.csv",
+    ...     assignments_csv="path/to/combined_assignments.csv",
+    ...     id_col="spot_id",
+    ...     use_palo=True,
+    ...     selection_mode="top_k",
+    ...     top_k=5,
+    ...     k_mode="auto",
+    ...     api_key="your-api-key"
+    ... )
+    >>> 
+    >>> # Example 3: Legacy mode (separate CSV files per model)
     >>> df = lstar.l_star(
     ...     image_dir="path/to/images",
     ...     dataset_name="DLPFC (from 10X Visium Human Brain)",
@@ -162,9 +208,51 @@ def l_star(
     logger.info("STARTING L-STAR PIPELINE")
     logger.info("=" * 60)
     
-    image_dir = Path(image_dir)
+    # Validate required arguments
+    if dataset_name is None:
+        raise ValueError("dataset_name is required")
+    
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Determine input mode: pre-generated images vs. CSV-based generation
+    if image_dir is None:
+        # Mode 1: Generate images from CSV files
+        if spatial_locations_csv is None or assignments_csv is None:
+            raise ValueError(
+                "Either image_dir must be provided, or both spatial_locations_csv and "
+                "assignments_csv must be provided for image generation."
+            )
+        if id_col is None:
+            id_col = "spot_id"  # Default ID column name
+            logger.info(f"Using default id_col='{id_col}'")
+        
+        logger.info("=" * 60)
+        logger.info("GENERATING IMAGES FROM CSV FILES")
+        logger.info("=" * 60)
+        logger.info(f"Spatial locations CSV: {spatial_locations_csv}")
+        logger.info(f"Assignments CSV: {assignments_csv}")
+        logger.info(f"ID column: {id_col}")
+        logger.info(f"Using Palo for color optimization: {use_palo}")
+        
+        # Generate images
+        generated_image_dir, model_images = generate_images_from_csvs(
+            spatial_locations_csv=spatial_locations_csv,
+            assignments_csv=assignments_csv,
+            id_col=id_col,
+            output_dir=output_dir / "generated_images",
+            use_palo=use_palo,
+            he_image_path=he_image_path,
+        )
+        
+        image_dir = generated_image_dir
+        logger.info(f"Generated images saved to: {image_dir}")
+    else:
+        # Mode 2: Use pre-generated images (original mode)
+        image_dir = Path(image_dir)
+        if not image_dir.is_dir():
+            raise NotADirectoryError(f"Image directory not found: {image_dir}")
+        logger.info(f"Using pre-generated images from: {image_dir}")
     
     # Extract kwargs for pairwise and consensus
     pairwise_kwargs = {

@@ -24,7 +24,6 @@ from lstar.io_utils import (
     read_combined_assignments_csv,
     build_name_mappings,
     match_models_with_fuzzy_matching,
-    normalize_name,
 )
 
 logger = logging.getLogger(__name__)

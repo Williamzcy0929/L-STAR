@@ -87,7 +87,7 @@ df = lstar.l_star(
     assignments_csv="path/to/assignments.csv",              # CSV with spot_id and method columns
     id_col="spot_id",                                       # ID column name
     use_palo=True,                                          # Use Palo for color optimization (default: True)
-    fixed_k=7,
+    fixed_k=5,
     api_key="your-openai-api-key"
 )
 
@@ -109,7 +109,7 @@ df = lstar.l_star(
     dataset_name="DLPFC (from 10X Visium Human Brain)",
     assignments_csv="path/to/assignments.csv",  # Combined assignments CSV
     id_col="spot_id",                     # ID column name
-    fixed_k=7,                             # Fixed number of clusters
+    fixed_k=5,                             # Fixed number of clusters
     api_key="your-openai-api-key"          # Or set OPENAI_API_KEY env var
 )
 
@@ -305,7 +305,7 @@ df = lstar.l_star(
     assignments_csv="assignments.csv",
     id_col="spot_id",
     model_names=["GraphST", "STAGATE", "SpaGCN", "BayesSpace"],
-    fixed_k=7
+    fixed_k=5
 )
 ```
 
@@ -320,7 +320,7 @@ df = lstar.l_star(
     id_col="spot_id",
     use_palo=True,  # Enable Palo color optimization
     he_image_path="path/to/he_image.png",  # Optional H&E image
-    fixed_k=7,
+    fixed_k=5,
     api_key="your-api-key"
 )
 ```
@@ -335,7 +335,7 @@ df = lstar.l_star(
     assignments_csv="assignments.csv",
     id_col="spot_id",
     use_palo=False,  # Disable Palo, use default color palettes
-    fixed_k=7,
+    fixed_k=5,
     api_key="your-api-key"
 )
 ```
@@ -428,7 +428,7 @@ If you use L-STAR in your research, please cite:
 
 ```bibtex
 @software{lstar,
-  title={L-STAR: LLM-Guided Spatial Domain Detection},
+  title={L-STAR: Visual LLM-Guided Consensus Spatial Domain Detection},
   author={Changyue Zhao, Zhicheng Ji},
   year={2025},
   url={https://github.com/Williamzcy0929/L-STAR}

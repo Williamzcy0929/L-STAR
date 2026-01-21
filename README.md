@@ -13,7 +13,6 @@ Before any model comparison, spatial domain visualizations are **reconstructed f
 Given spatial coordinates and per-spot domain labels from each method, L-STAR regenerates domain images using the **Palo** color optimization strategy, which assigns visually distinct colors to spatially adjacent domains. This avoids palette-induced bias and ensures that visual differences reflect structural discrepancies rather than arbitrary color choices.
 
 This step is fully automated, supports multiple coordinate formats, and produces standardized PNG images for all methods (and optional H&E references) that are later consumed by the LLM comparison stage.
-(Related code for this reconstruction step is provided in the repository. )
 
 ### **Step 1. Pairwise Visual Comparisons via LLMs**
 

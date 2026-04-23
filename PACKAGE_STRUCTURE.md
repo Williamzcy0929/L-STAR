@@ -62,15 +62,6 @@ lstar/
 ### `lstar/pipeline.py`
 - `l_star()`: High-level pipeline function that orchestrates pairwise + consensus
 
-## Key Features
-
-1. **Caching**: Pairwise comparisons are cached to avoid redundant LLM calls
-2. **Error Handling**: Clear error messages for missing files, mismatched data, etc.
-3. **Logging**: Uses Python logging module (INFO/WARNING/ERROR levels)
-4. **Type Hints**: Full type annotations for all public functions
-5. **Flexible I/O**: Supports both directory-based and explicit file list inputs
-6. **Reproducibility**: Random state support for deterministic results
-
 ## Usage Patterns
 
 ### Full Pipeline

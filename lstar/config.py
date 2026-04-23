@@ -23,4 +23,5 @@ DEFAULT_HE_BASENAME = "he.png"
 # Default consensus parameters
 DEFAULT_REPS = 5
 DEFAULT_TOP_K = 5
+DEFAULT_K_RANGE = range(2, 30)
 

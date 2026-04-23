@@ -72,9 +72,9 @@ The Palo package provides the `Palo::Palo()` function with the following signatu
 
 ```r
 Palo::Palo(
-  u,              # 2-column coordinate matrix (x, y positions)
-  cl,             # Cluster labels (character vector)
-  pal,            # Initial palette (character vector of hex colors)
+  position,       # 2-column coordinate matrix (x, y positions)
+  cluster,        # Cluster labels (character vector)
+  palette,        # Initial palette (character vector of hex colors)
   rgb_weight,     # Optional: numeric vector of length 3 (default: c(1, 1, 1))
   color_blind_fun # Optional: color blindness function ("deutan", "protan", "tritan")
 )

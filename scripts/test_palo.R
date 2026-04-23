@@ -16,28 +16,31 @@ cat(sprintf("Palo version: %s\n", version))
 # Run minimal test
 cat("Running minimal Palo::Palo() test...\n")
 
-# Create test data: 3 spots with 2 clusters
-u <- matrix(c(
+# Create test data: 6 spots with 2 clusters
+position = matrix(c(
   1.0, 1.0,
   2.0, 1.0,
-  3.0, 2.0
+  1.0, 2.0,
+  3.0, 3.0,
+  4.0, 3.0,
+  3.0, 4.0
 ), ncol = 2, byrow = TRUE)
 
-cl <- c("1", "1", "2")
-pal <- c("#FF0000", "#00FF00")  # Red, Green
+cluster = c("1", "1", "1", "2", "2", "2")
+palette = c("#FF0000", "#00FF00")  # Red, Green
 
 # Call Palo
-result <- Palo::Palo(u = u, cl = cl, pal = pal)
+result = Palo::Palo(position = position, cluster = cluster, palette = palette)
 
 # Check result
 if (is.null(result) || length(result) == 0) {
   stop("Palo::Palo() returned empty result")
 }
 
-cat(sprintf("✓ Palo::Palo() test passed. Result: %d optimized colors\n", length(result)))
+cat(sprintf("Palo::Palo() test passed. Result: %d optimized colors\n", length(result)))
 cat("Optimized colors:\n")
 for (i in seq_along(result)) {
   cat(sprintf("  Cluster %s: %s\n", names(result)[i], result[i]))
 }
 
-cat("\n✓ All tests passed!\n")
+cat("\nAll tests passed!\n")

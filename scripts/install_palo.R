@@ -26,20 +26,27 @@ if (length(args) >= 1 && nchar(args[1]) > 0) {
 # Verify installation
 if (require("Palo", quietly = TRUE)) {
   version <- as.character(packageVersion("Palo"))
-  cat(sprintf("✓ Palo successfully installed (version: %s)\n", version))
+  cat(sprintf("Palo successfully installed (version: %s)\n", version))
   
   # Run a quick smoke test
   cat("Running smoke test...\n")
   tryCatch({
-    # Create minimal test data
-    u <- matrix(c(1, 2, 3, 1, 2, 3), ncol = 2)
-    cl <- c("1", "2", "1")
-    pal <- c("#FF0000", "#00FF00")
+    # Create small but stable test data (>= 3 points per cluster)
+    position = matrix(c(
+      1.0, 1.0,
+      2.0, 1.0,
+      1.0, 2.0,
+      3.0, 3.0,
+      4.0, 3.0,
+      3.0, 4.0
+    ), ncol = 2, byrow = TRUE)
+    cluster = c("1", "1", "1", "2", "2", "2")
+    palette = c("#FF0000", "#00FF00")
     
-    result <- Palo::Palo(u = u, cl = cl, pal = pal)
-    cat("✓ Palo::Palo() smoke test passed\n")
+    result = Palo::Palo(position = position, cluster = cluster, palette = palette)
+    cat("Palo::Palo() smoke test passed\n")
   }, error = function(e) {
-    cat(sprintf("⚠ Palo smoke test failed: %s\n", e$message))
+    cat(sprintf("Palo smoke test failed: %s\n", e$message))
   })
 } else {
   stop("Failed to install Palo package")

@@ -1,6 +1,20 @@
 # L-STAR R Dependencies
 
-This directory contains scripts for installing and testing the Palo R package, which is used for spatially-aware color palette optimization.
+This directory contains helper scripts for installing and testing Palo in source checkouts.
+In packaged installs, L-STAR uses bundled R scripts from `lstar/resources/`.
+
+## Runtime R Components (when `use_palo=True`)
+
+L-STAR uses two R scripts at runtime:
+
+- `run_palo.R`: computes Palo-optimized palettes
+- `plot_spatial_with_palo.R`: renders per-method spatial images with `ggplot2` (no legend)
+
+Required R packages:
+
+- `Palo`
+- `ggplot2`
+- `RColorBrewer`
 
 ## Palo Installation
 
@@ -19,6 +33,9 @@ Rscript scripts/install_palo.R <commit_sha_or_tag>
 ```r
 # Install remotes if not already installed
 install.packages("remotes", repos = "https://cloud.r-project.org")
+
+# Install plotting dependencies
+install.packages(c("ggplot2", "RColorBrewer"), repos = "https://cloud.r-project.org")
 
 # Install Palo
 remotes::install_github("Winnie09/Palo", repos = "https://cloud.r-project.org")
@@ -54,7 +71,8 @@ Rscript scripts/test_palo.R
 ```
 
 Expected output:
-```
+
+```text
 Testing Palo installation...
 Palo version: <version>
 Running minimal Palo::Palo() test...
@@ -87,6 +105,7 @@ Returns: Named character vector mapping cluster labels to optimized hex colors.
 ### Rscript not found
 
 Ensure R is installed and in your PATH:
+
 ```bash
 which Rscript
 Rscript --version
@@ -96,14 +115,30 @@ Rscript --version
 
 1. Check internet connection (for GitHub access)
 2. Ensure remotes/devtools are installed:
+
    ```r
    install.packages(c("remotes", "devtools"), repos = "https://cloud.r-project.org")
    ```
+
 3. Try installing from a specific commit:
+
    ```bash
    Rscript scripts/install_palo.R <commit_sha>
    ```
 
 ### Runtime errors
 
-If Palo fails at runtime, L-STAR will automatically fall back to default color palettes. Check logs for error messages.
+If Palo or R plotting fails at runtime, L-STAR automatically falls back to matplotlib/default color rendering. Check logs for details.
+
+### Path dependency / script resolution
+
+L-STAR resolves runtime scripts in this order:
+
+1. Environment variable override
+2. Bundled package resources (`lstar/resources/*.R`)
+3. Local fallback paths for editable/development installs
+
+Optional environment variables:
+
+- `LSTAR_RUN_PALO_SCRIPT` (override path for `run_palo.R`)
+- `LSTAR_PLOT_SPATIAL_SCRIPT` (override path for `plot_spatial_with_palo.R`)

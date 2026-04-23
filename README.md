@@ -1,4 +1,4 @@
-# L-STAR: Visual LLM-Guided Consensus Spatial Domain Detection
+# L-STAR: LLM-Guided Spatial Domain Detection
 
 L-STAR is a Python package for performing LLM-based pairwise model comparisons and consensus clustering for spatial transcriptomics data. The pipeline uses Large Language Models (LLMs) to evaluate clustering models through pairwise image comparisons, then aggregates the top-performing models using Evidence Accumulation Clustering (EAC) to produce a robust consensus clustering result.
 
@@ -6,13 +6,14 @@ L-STAR is a Python package for performing LLM-based pairwise model comparisons a
 
 The L-STAR pipeline consists of three main stages:
 
-### **Step 0. Spatial Domain Visualization Reconstruction (Palo-based)**
+### **Step 0. Spatial Domain Visualization Reconstruction**
 
 Before any model comparison, spatial domain visualizations are **reconstructed from raw clustering assignments** to ensure fair, color-consistent, and spatially interpretable inputs for downstream evaluation.
 
 Given spatial coordinates and per-spot domain labels from each method, L-STAR regenerates domain images using the **Palo** color optimization strategy, which assigns visually distinct colors to spatially adjacent domains. This avoids palette-induced bias and ensures that visual differences reflect structural discrepancies rather than arbitrary color choices.
 
 This step is fully automated, supports multiple coordinate formats, and produces standardized PNG images for all methods (and optional H&E references) that are later consumed by the LLM comparison stage.
+(Related code for this reconstruction step is provided in the repository. )
 
 ### **Step 1. Pairwise Visual Comparisons via LLMs**
 
@@ -35,7 +36,7 @@ This step filters out systematically underperforming methods while retaining com
 
 The selected top-performing methods are integrated using **Evidence Accumulation Clustering (EAC)**. Pairwise co-assignment frequencies across methods are accumulated into a consensus similarity matrix, which is then clustered to produce a final spatial domain assignment.
 
-The resulting consensus labels are reported as **L-STAR**, representing an ensemble spatial domain detection that leverages both human-interpretable visual judgment (via LLMs) and classical clustering theory.
+The resulting consensus labels are reported as **L-STAR**, representing an ensemble spatial domain detection that leverages both human-interpretable visual judgment (via LLMs) and classical clustering theory. This consensus is subsequently evaluated against ground truth using standard metrics such as ARI and AMI.
 
 ## Installation
 
@@ -51,31 +52,36 @@ OR
 pip install "git+https://github.com/Williamzcy0929/L-STAR.git"
 ```
 
-### R Dependencies (for Palo color optimization)
+### R Dependencies
 
-By default, L-STAR uses the [Palo](https://github.com/Winnie09/Palo) R package for spatially-aware color palette optimization when generating spatial visualization images from CSV files. Palo optimizes colors so that spatially neighboring clusters have visually distinct colors, improving visualization interpretability.
+When generating images from CSVs with `use_palo=True`, L-STAR uses **R scripts** bundled inside the Python package:
 
-**Install Palo (recommended):**
-```bash
-Rscript scripts/install_palo.R
+- `run_palo.R`: computes Palo-optimized palettes
+- `plot_spatial_with_palo.R`: renders per-method spatial PNGs with **ggplot2** (no legend)
+
+Required R packages:
+
+- [Palo](https://github.com/Winnie09/Palo)
+- `ggplot2`
+- `RColorBrewer`
+
+Install example:
+```r
+install.packages(c("ggplot2", "RColorBrewer"), repos = "https://cloud.r-project.org")
+remotes::install_github("Winnie09/Palo", repos = "https://cloud.r-project.org")
 ```
 
-**Verify installation:**
-```bash
-Rscript scripts/test_palo.R
-```
+If R/Palo/ggplot dependencies are unavailable at runtime, L-STAR automatically falls back to matplotlib/default color rendering so the pipeline can still run.
 
-**Note:** If Palo is not installed, L-STAR will automatically fall back to default color palettes. The pipeline will still function correctly, but color optimization for spatially neighboring clusters will not be performed.
-
-See `scripts/README.md` for detailed installation instructions and troubleshooting.
+For source checkouts, `scripts/install_palo.R` and `scripts/test_palo.R` are still available for setup/testing convenience.
 
 ## Quick Start
 
 L-STAR supports two modes for spatial visualization:
 
-### Mode 1: Generate Images from CSV Files (Default with Palo)
+### Default Mode: Generate Images from CSV Files
 
-By default, L-STAR can generate spatial visualization images internally from spatial locations and domain assignments, using Palo for color palette optimization:
+By default, L-STAR can generate spatial visualization images internally from spatial locations and domain assignments. With `use_palo=True`, images are rendered by R/ggplot2 using Palo-optimized palettes (one PNG per method, legend disabled):
 
 ```python
 import lstar
@@ -87,7 +93,7 @@ df = lstar.l_star(
     assignments_csv="path/to/assignments.csv",              # CSV with spot_id and method columns
     id_col="spot_id",                                       # ID column name
     use_palo=True,                                          # Use Palo for color optimization (default: True)
-    fixed_k=5,
+    fixed_k=7,
     api_key="your-openai-api-key"
 )
 
@@ -96,9 +102,7 @@ print(df.head())
 # Generated images are saved to output_dir/generated_images/
 ```
 
-### Mode 2: Using Pre-generated Images
-
-If the visualizations of spatial domains are already generated, L-STAR can also treat them as inputs:
+### Image Mode: Using Pre-generated Images
 
 ```python
 import lstar
@@ -109,7 +113,7 @@ df = lstar.l_star(
     dataset_name="DLPFC (from 10X Visium Human Brain)",
     assignments_csv="path/to/assignments.csv",  # Combined assignments CSV
     id_col="spot_id",                     # ID column name
-    fixed_k=5,                             # Fixed number of clusters
+    fixed_k=7,                             # Fixed number of clusters
     api_key="your-openai-api-key"          # Or set OPENAI_API_KEY env var
 )
 
@@ -119,7 +123,8 @@ print(df.head())
 
 **Key Points:**
 - When `spatial_locations_csv` and `assignments_csv` are provided, images are generated internally
-- Palo is used by default (`use_palo=True`) to optimize colors for spatially neighboring clusters
+- With `use_palo=True`, L-STAR uses bundled R scripts (`run_palo.R` + `plot_spatial_with_palo.R`) for color optimization and rendering
+- Output remains one image per method, with no legend, consistent dimensions, and `coord_equal`-style geometry
 - To use pre-generated images instead, provide `image_dir` and omit `spatial_locations_csv`
 - Generated images are saved to `output_dir/generated_images/` with filenames matching method names
 
@@ -127,7 +132,7 @@ print(df.head())
 
 L-STAR supports two input modes:
 
-### Mode 1: CSV Files for Image Generation (Default with Palo)
+### Default Mode: CSV Files for Image Generation
 
 When generating images internally, provide two CSV files:
 
@@ -143,14 +148,6 @@ spot_3,12.0,19.8
 ...
 ```
 
-### Mode 2: Pre-generated Images
-
-The `image_dir` should contain:
-- `he.png` (or custom name with extensions .png, .jpg, .jpeg, or .pdf): H&E reference image (optional)
-- `Model1.png`, `Model2.jpg`, etc.: Clustering visualization images for each model
-  - Supported formats: `.png`, `.jpg`, `.jpeg`, `.pdf`
-  - If multiple formats exist for the same model name, PNG is preferred over JPG/JPEG, which is preferred over PDF
-
 **2. Assignments CSV** (`assignments_csv`):
 - Required columns: `spot_id` (or custom `id_col`), plus one column per method
 - Column names (except `spot_id`) are treated as method names
@@ -165,17 +162,25 @@ spot_3,1,1,1,2
 ```
 
 **Image Generation Process:**
-- L-STAR internally generates spatial visualization images for each method
-- By default, uses Palo R package to optimize color palettes so that spatially neighboring clusters have visually distinct colors
+- L-STAR internally generates one spatial visualization image per method column
+- With `use_palo=True`, palette optimization and plotting run through bundled R scripts (Palo + ggplot2)
 - Generated images are saved to `output_dir/generated_images/` with filenames matching method names (e.g., `GraphST.png`, `SpaGCN.png`)
 - If `he_image_path` is provided, the H&E image is copied to the generated images directory
 
 **Palo Color Optimization:**
 - Palo optimizes colors based on spatial adjacency, ensuring neighboring clusters are visually distinct
-- Set `use_palo=False` to disable Palo and use default color palettes
-- If Palo is not installed, L-STAR automatically falls back to default colors
+- Set `use_palo=False` to disable Palo and use matplotlib/default color palettes
+- If Palo/R/ggplot dependencies are unavailable, L-STAR automatically falls back to matplotlib rendering
 
-### Assignment CSVs
+### Image Mode: Pre-generated Images
+
+The `image_dir` should contain:
+- `he.png` (or custom name with extensions .png, .jpg, .jpeg, or .pdf): H&E reference image (optional)
+- `Model1.png`, `Model2.jpg`, etc.: Clustering visualization images for each model
+  - Supported formats: `.png`, `.jpg`, `.jpeg`, `.pdf`
+  - If multiple formats exist for the same model name, PNG is preferred over JPG/JPEG, which is preferred over PDF
+
+### Assignment CSVs (Legacy Mode)
 
 For the legacy mode with separate CSV files per model, each model should have a CSV file with clustering assignments. The CSV should contain:
 - An ID column (first column, e.g., `spot_id`, `cell_id`)
@@ -305,7 +310,7 @@ df = lstar.l_star(
     assignments_csv="assignments.csv",
     id_col="spot_id",
     model_names=["GraphST", "STAGATE", "SpaGCN", "BayesSpace"],
-    fixed_k=5
+    fixed_k=7
 )
 ```
 
@@ -320,7 +325,7 @@ df = lstar.l_star(
     id_col="spot_id",
     use_palo=True,  # Enable Palo color optimization
     he_image_path="path/to/he_image.png",  # Optional H&E image
-    fixed_k=5,
+    fixed_k=7,
     api_key="your-api-key"
 )
 ```
@@ -335,7 +340,7 @@ df = lstar.l_star(
     assignments_csv="assignments.csv",
     id_col="spot_id",
     use_palo=False,  # Disable Palo, use default color palettes
-    fixed_k=5,
+    fixed_k=7,
     api_key="your-api-key"
 )
 ```
@@ -392,6 +397,8 @@ consensus_df = lstar.run_consensus_clustering(
 ### Environment Variables
 
 - `OPENAI_API_KEY`: OpenAI API key (can be set instead of passing `api_key` parameter)
+- `LSTAR_RUN_PALO_SCRIPT`: Optional absolute path override for `run_palo.R`
+- `LSTAR_PLOT_SPATIAL_SCRIPT`: Optional absolute path override for `plot_spatial_with_palo.R`
 
 ### Default Values
 
@@ -428,7 +435,7 @@ If you use L-STAR in your research, please cite:
 
 ```bibtex
 @software{lstar,
-  title={L-STAR: Visual LLM-Guided Consensus Spatial Domain Detection},
+  title={L-STAR: LLM-Guided Spatial Domain Detection},
   author={Changyue Zhao, Zhicheng Ji},
   year={2025},
   url={https://github.com/Williamzcy0929/L-STAR}

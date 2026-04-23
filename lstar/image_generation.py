@@ -1,7 +1,6 @@
 """Image generation from spatial locations and domain assignments using Palo for color optimization."""
 
 import os
-from contextlib import ExitStack
 from importlib import resources
 import logging
 import subprocess
@@ -224,6 +223,34 @@ def get_palo_optimized_colors(
         return color_dict
 
 
+def _resolve_r_script_path(
+    script_filename: str,
+    env_var_name: str,
+) -> Optional[Path]:
+    """Resolve an R script path from env var, packaged resources, or local fallbacks."""
+    script_locations = []
+
+    env_script = os.getenv(env_var_name)
+    if env_script:
+        script_locations.append(Path(env_script))
+
+    try:
+        bundled_script = resources.files("lstar").joinpath(f"resources/{script_filename}")
+        script_locations.append(Path(str(bundled_script)))
+    except Exception:
+        # Ignore resource resolution errors; fallback paths are tried below.
+        pass
+
+    # Fallbacks for editable installs and local development.
+    script_locations.extend([
+        Path(__file__).parent.parent / "scripts" / script_filename,
+        Path(__file__).parent.parent.parent / "scripts" / script_filename,
+        Path("scripts") / script_filename,
+    ])
+
+    return next((loc for loc in script_locations if loc.exists()), None)
+
+
 def run_palo_script(
     coords_file: Path,
     assignments_file: Path,
@@ -233,83 +260,128 @@ def run_palo_script(
     color_blind_fun: Optional[str] = None,
 ) -> bool:
     """Run the bundled Palo R script and return whether it succeeded."""
-    with ExitStack() as stack:
-        script_locations = []
+    r_script_path = _resolve_r_script_path(
+        script_filename="run_palo.R",
+        env_var_name="LSTAR_RUN_PALO_SCRIPT",
+    )
+    if r_script_path is None:
+        logger.warning(
+            "run_palo.R script not found. Using default colors. "
+            "Please ensure run_palo.R is packaged or set LSTAR_RUN_PALO_SCRIPT."
+        )
+        return False
 
-        env_script = os.getenv("LSTAR_RUN_PALO_SCRIPT")
-        if env_script:
-            script_locations.append(Path(env_script))
+    cmd = [
+        "Rscript",
+        str(r_script_path),
+        str(coords_file),
+        str(assignments_file),
+        id_col,
+        str(output_file),
+    ]
+    if rgb_weight is not None:
+        cmd.extend([f"{rgb_weight[0]},{rgb_weight[1]},{rgb_weight[2]}"])
+        if color_blind_fun is not None:
+            cmd.append(color_blind_fun)
+    elif color_blind_fun is not None:
+        cmd.extend(["", color_blind_fun])
 
-        try:
-            bundled_script = resources.files("lstar").joinpath("resources/run_palo.R")
-            bundled_script_path = Path(stack.enter_context(resources.as_file(bundled_script)))
-            script_locations.append(bundled_script_path)
-        except Exception:
-            # Ignore resource resolution errors; fallback paths are tried below.
-            pass
-
-        # Fallbacks for editable installs and local development.
-        script_locations.extend([
-            Path(__file__).parent.parent / "scripts" / "run_palo.R",
-            Path(__file__).parent.parent.parent / "scripts" / "run_palo.R",
-            Path("scripts") / "run_palo.R",
-        ])
-
-        r_script_path = next((loc for loc in script_locations if loc.exists()), None)
-        if r_script_path is None:
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        if result.returncode != 0:
             logger.warning(
-                f"run_palo.R script not found in expected locations: {script_locations}. "
-                f"Using default colors. Please ensure run_palo.R is packaged or set "
-                f"LSTAR_RUN_PALO_SCRIPT."
+                f"Palo R script failed with exit code {result.returncode}. "
+                f"stderr: {result.stderr[:500] if result.stderr else 'No error message'}. "
+                f"Using default colors."
             )
             return False
+        if not output_file.exists():
+            logger.warning("Palo output file not found, using default colors")
+            return False
+        return True
+    except subprocess.TimeoutExpired:
+        logger.error("Palo R script timed out, using default colors")
+        return False
+    except FileNotFoundError:
+        logger.error(
+            "Rscript not found. Please install R and ensure it's in PATH. "
+            "Using default colors."
+        )
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error in Palo color optimization: {e}. Using default colors.")
+        return False
 
-        cmd = [
-            "Rscript",
-            str(r_script_path),
-            str(coords_file),
-            str(assignments_file),
-            id_col,
-            str(output_file),
-        ]
-        if rgb_weight is not None:
-            cmd.extend([f"{rgb_weight[0]},{rgb_weight[1]},{rgb_weight[2]}"])
-            if color_blind_fun is not None:
-                cmd.append(color_blind_fun)
-        elif color_blind_fun is not None:
-            cmd.extend(["", color_blind_fun])
 
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300,
-                check=False,
+def run_spatial_plot_script(
+    coords_file: Path,
+    assignments_file: Path,
+    id_col: str,
+    output_path: Path,
+    title: Optional[str],
+    figsize: Tuple[float, float],
+    dpi: int,
+    use_palo: bool,
+) -> bool:
+    """Generate a spatial plot using the bundled ggplot2 R script."""
+    r_script_path = _resolve_r_script_path(
+        script_filename="plot_spatial_with_palo.R",
+        env_var_name="LSTAR_PLOT_SPATIAL_SCRIPT",
+    )
+    if r_script_path is None:
+        logger.warning(
+            "plot_spatial_with_palo.R script not found. Falling back to matplotlib."
+        )
+        return False
+
+    plot_title = title if title is not None else ""
+    cmd = [
+        "Rscript",
+        str(r_script_path),
+        str(coords_file),
+        str(assignments_file),
+        id_col,
+        str(output_path),
+        plot_title,
+        str(figsize[0]),
+        str(figsize[1]),
+        str(dpi),
+        "TRUE" if use_palo else "FALSE",
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                f"Spatial plotting R script failed with exit code {result.returncode}. "
+                f"stderr: {result.stderr[:500] if result.stderr else 'No error message'}. "
+                f"Falling back to matplotlib."
             )
-            if result.returncode != 0:
-                logger.warning(
-                    f"Palo R script failed with exit code {result.returncode}. "
-                    f"stderr: {result.stderr[:500] if result.stderr else 'No error message'}. "
-                    f"Using default colors."
-                )
-                return False
-            if not output_file.exists():
-                logger.warning("Palo output file not found, using default colors")
-                return False
-            return True
-        except subprocess.TimeoutExpired:
-            logger.error("Palo R script timed out, using default colors")
             return False
-        except FileNotFoundError:
-            logger.error(
-                "Rscript not found. Please install R and ensure it's in PATH. "
-                "Using default colors."
-            )
+        if not output_path.exists():
+            logger.warning("Spatial plotting script did not produce output file.")
             return False
-        except Exception as e:
-            logger.error(f"Unexpected error in Palo color optimization: {e}. Using default colors.")
-            return False
+        return True
+    except subprocess.TimeoutExpired:
+        logger.error("Spatial plotting R script timed out; falling back to matplotlib.")
+        return False
+    except FileNotFoundError:
+        logger.error("Rscript not found. Falling back to matplotlib.")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error in R plotting: {e}. Falling back to matplotlib.")
+        return False
 
 
 def _get_default_colors(cluster_ids: list) -> Dict[int, Tuple[float, float, float]]:
@@ -327,6 +399,45 @@ def _get_default_colors(cluster_ids: list) -> Dict[int, Tuple[float, float, floa
         colors = [cmap(i % 20 / 19)[:3] for i in range(n)]
     
     return {cluster_id: color for cluster_id, color in zip(cluster_ids, colors)}
+
+
+def _generate_spatial_image_matplotlib(
+    merged: pd.DataFrame,
+    color_dict: Dict[Union[int, str], Tuple[float, float, float]],
+    output_path: Path,
+    title: Optional[str],
+    figsize: Tuple[float, float],
+    dpi: int,
+    show_legend: bool,
+) -> None:
+    """Render a spatial image using matplotlib."""
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+    for cluster_id in sorted(merged['cluster'].unique()):
+        cluster_data = merged[merged['cluster'] == cluster_id]
+        color = color_dict.get(cluster_id, (0.5, 0.5, 0.5))
+        ax.scatter(
+            cluster_data['x'],
+            cluster_data['y'],
+            c=[color],
+            label=f'Cluster {cluster_id}',
+            s=20,
+            alpha=0.7,
+            edgecolors='none',
+        )
+
+    ax.set_xlabel('X coordinate', fontsize=12)
+    ax.set_ylabel('Y coordinate', fontsize=12)
+    if title:
+        ax.set_title(title, fontsize=14, fontweight='bold')
+    if show_legend:
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+    ax.grid(True, alpha=0.3)
+    ax.set_aspect('equal', adjustable='box')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
 
 
 def generate_spatial_image(
@@ -366,56 +477,61 @@ def generate_spatial_image(
     if len(merged) == 0:
         raise ValueError("No matching spots found between assignments and spatial coordinates")
     
-    # Get colors
+    if output_path is None:
+        output_path = Path(tempfile.mktemp(suffix='.png'))
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if use_palo:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            assignments_file = tmpdir_path / "assignments.csv"
+            coords_file = tmpdir_path / "coords.csv"
+
+            merged_assignments = merged[[id_col, 'cluster']].copy()
+            merged_assignments['cluster'] = merged_assignments['cluster'].astype(str)
+            merged_assignments.to_csv(assignments_file, index=False)
+            merged[[id_col, 'x', 'y']].to_csv(coords_file, index=False)
+
+            plotted = run_spatial_plot_script(
+                coords_file=coords_file,
+                assignments_file=assignments_file,
+                id_col=id_col,
+                output_path=output_path,
+                title=title,
+                figsize=figsize,
+                dpi=dpi,
+                use_palo=True,
+            )
+            if plotted:
+                logger.info(f"Generated spatial image via R/ggplot: {output_path}")
+                return output_path
+
+            logger.warning("Falling back to matplotlib renderer for spatial image.")
+
+    unique_clusters = sorted(merged['cluster'].unique())
     if use_palo:
         try:
             color_dict = get_palo_optimized_colors(assignments, spatial_coords, id_col)
         except Exception as e:
             logger.warning(f"Palo color optimization failed: {e}. Using default colors.")
-            unique_clusters = sorted(merged['cluster'].unique())
             color_dict = _get_default_colors(unique_clusters)
     else:
-        unique_clusters = sorted(merged['cluster'].unique())
         color_dict = _get_default_colors(unique_clusters)
-    
-    # Create figure
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-    
-    # Plot each cluster with its color
-    for cluster_id in sorted(merged['cluster'].unique()):
-        cluster_data = merged[merged['cluster'] == cluster_id]
-        color = color_dict.get(cluster_id, (0.5, 0.5, 0.5))
-        ax.scatter(
-            cluster_data['x'],
-            cluster_data['y'],
-            c=[color],
-            label=f'Cluster {cluster_id}',
-            s=20,
-            alpha=0.7,
-            edgecolors='none'
-        )
-    
-    ax.set_xlabel('X coordinate', fontsize=12)
-    ax.set_ylabel('Y coordinate', fontsize=12)
-    if title:
-        ax.set_title(title, fontsize=14, fontweight='bold')
-    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
-    ax.grid(True, alpha=0.3)
-    ax.set_aspect('equal', adjustable='box')
-    
-    # Save figure
-    if output_path is None:
-        output_path = Path(tempfile.mktemp(suffix='.png'))
-    
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
-    plt.close(fig)
-    
+
+    _generate_spatial_image_matplotlib(
+        merged=merged,
+        color_dict=color_dict,
+        output_path=output_path,
+        title=title,
+        figsize=figsize,
+        dpi=dpi,
+        show_legend=False,
+    )
+
     logger.info(f"Generated spatial image: {output_path}")
-    
+
     return output_path
 
 

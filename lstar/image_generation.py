@@ -1,5 +1,8 @@
 """Image generation from spatial locations and domain assignments using Palo for color optimization."""
 
+import os
+from contextlib import ExitStack
+from importlib import resources
 import logging
 import subprocess
 import tempfile
@@ -164,27 +167,6 @@ def get_palo_optimized_colors(
     if len(merged) == 0:
         raise ValueError("No matching spots found between assignments and spatial coordinates")
     
-    # Find the run_palo.R script (should be in scripts/ directory relative to package root)
-    # Try multiple locations
-    script_locations = [
-        Path(__file__).parent.parent / "scripts" / "run_palo.R",
-        Path(__file__).parent.parent.parent / "scripts" / "run_palo.R",
-        Path("scripts") / "run_palo.R",
-    ]
-    
-    r_script_path = None
-    for loc in script_locations:
-        if loc.exists():
-            r_script_path = loc
-            break
-    
-    if r_script_path is None:
-        logger.warning(
-            f"run_palo.R script not found in expected locations: {script_locations}. "
-            f"Using default colors. Please ensure scripts/run_palo.R exists."
-        )
-        return _get_default_colors(unique_clusters)
-    
     # Create temporary files for R script
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -202,87 +184,132 @@ def get_palo_optimized_colors(
         # Write coordinates (spot_id, x, y)
         merged[[id_col, 'x', 'y']].to_csv(coords_file, index=False)
         
-        # Build Rscript command
+        success = run_palo_script(
+            coords_file=coords_file,
+            assignments_file=assignments_file,
+            id_col=id_col,
+            output_file=output_file,
+            rgb_weight=rgb_weight,
+            color_blind_fun=color_blind_fun,
+        )
+        if not success:
+            return _get_default_colors(unique_clusters)
+
+        colors_df = pd.read_csv(output_file)
+        color_dict = {}
+        for _, row in colors_df.iterrows():
+            # Handle both numeric and string cluster IDs
+            cluster_id_str = str(row['cluster'])
+            try:
+                # Try to convert to int if possible, otherwise keep as string key
+                cluster_id = int(float(cluster_id_str))
+            except (ValueError, TypeError):
+                cluster_id = cluster_id_str
+
+            r = float(row['r'])
+            g = float(row['g'])
+            b = float(row['b'])
+
+            # Map back to original cluster ID type from unique_clusters
+            # Find matching cluster in unique_clusters
+            for orig_cluster in unique_clusters:
+                if str(orig_cluster) == cluster_id_str:
+                    color_dict[orig_cluster] = (r, g, b)
+                    break
+            else:
+                # If not found, use the converted ID
+                color_dict[cluster_id] = (r, g, b)
+
+        logger.info(f"Generated {len(color_dict)} optimized colors using Palo::Palo()")
+        return color_dict
+
+
+def run_palo_script(
+    coords_file: Path,
+    assignments_file: Path,
+    id_col: str,
+    output_file: Path,
+    rgb_weight: Optional[Tuple[float, float, float]] = None,
+    color_blind_fun: Optional[str] = None,
+) -> bool:
+    """Run the bundled Palo R script and return whether it succeeded."""
+    with ExitStack() as stack:
+        script_locations = []
+
+        env_script = os.getenv("LSTAR_RUN_PALO_SCRIPT")
+        if env_script:
+            script_locations.append(Path(env_script))
+
+        try:
+            bundled_script = resources.files("lstar").joinpath("resources/run_palo.R")
+            bundled_script_path = Path(stack.enter_context(resources.as_file(bundled_script)))
+            script_locations.append(bundled_script_path)
+        except Exception:
+            # Ignore resource resolution errors; fallback paths are tried below.
+            pass
+
+        # Fallbacks for editable installs and local development.
+        script_locations.extend([
+            Path(__file__).parent.parent / "scripts" / "run_palo.R",
+            Path(__file__).parent.parent.parent / "scripts" / "run_palo.R",
+            Path("scripts") / "run_palo.R",
+        ])
+
+        r_script_path = next((loc for loc in script_locations if loc.exists()), None)
+        if r_script_path is None:
+            logger.warning(
+                f"run_palo.R script not found in expected locations: {script_locations}. "
+                f"Using default colors. Please ensure run_palo.R is packaged or set "
+                f"LSTAR_RUN_PALO_SCRIPT."
+            )
+            return False
+
         cmd = [
-            'Rscript',
+            "Rscript",
             str(r_script_path),
             str(coords_file),
             str(assignments_file),
             id_col,
             str(output_file),
         ]
-        
-        # Add optional parameters
         if rgb_weight is not None:
             cmd.extend([f"{rgb_weight[0]},{rgb_weight[1]},{rgb_weight[2]}"])
             if color_blind_fun is not None:
                 cmd.append(color_blind_fun)
         elif color_blind_fun is not None:
             cmd.extend(["", color_blind_fun])
-        
-        # Run R script
+
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=300,  # 5 minute timeout
-                check=False  # Don't raise on non-zero exit, handle it ourselves
+                timeout=300,
+                check=False,
             )
-            
             if result.returncode != 0:
                 logger.warning(
                     f"Palo R script failed with exit code {result.returncode}. "
                     f"stderr: {result.stderr[:500] if result.stderr else 'No error message'}. "
                     f"Using default colors."
                 )
-                return _get_default_colors(unique_clusters)
-            
-            # Read output
-            if output_file.exists():
-                colors_df = pd.read_csv(output_file)
-                color_dict = {}
-                for _, row in colors_df.iterrows():
-                    # Handle both numeric and string cluster IDs
-                    cluster_id_str = str(row['cluster'])
-                    try:
-                        # Try to convert to int if possible, otherwise keep as string key
-                        cluster_id = int(float(cluster_id_str))
-                    except (ValueError, TypeError):
-                        cluster_id = cluster_id_str
-                    
-                    r = float(row['r'])
-                    g = float(row['g'])
-                    b = float(row['b'])
-                    
-                    # Map back to original cluster ID type from unique_clusters
-                    # Find matching cluster in unique_clusters
-                    for orig_cluster in unique_clusters:
-                        if str(orig_cluster) == cluster_id_str:
-                            color_dict[orig_cluster] = (r, g, b)
-                            break
-                    else:
-                        # If not found, use the converted ID
-                        color_dict[cluster_id] = (r, g, b)
-                
-                logger.info(f"Generated {len(color_dict)} optimized colors using Palo::Palo()")
-                return color_dict
-            else:
+                return False
+            if not output_file.exists():
                 logger.warning("Palo output file not found, using default colors")
-                return _get_default_colors(unique_clusters)
-                
+                return False
+            return True
         except subprocess.TimeoutExpired:
             logger.error("Palo R script timed out, using default colors")
-            return _get_default_colors(unique_clusters)
+            return False
         except FileNotFoundError:
             logger.error(
                 "Rscript not found. Please install R and ensure it's in PATH. "
                 "Using default colors."
             )
-            return _get_default_colors(unique_clusters)
+            return False
         except Exception as e:
             logger.error(f"Unexpected error in Palo color optimization: {e}. Using default colors.")
-            return _get_default_colors(unique_clusters)
+            return False
 
 
 def _get_default_colors(cluster_ids: list) -> Dict[int, Tuple[float, float, float]]:

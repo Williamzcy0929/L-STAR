@@ -30,6 +30,8 @@ dependencies = [
     "scipy>=1.7.0",
     "scikit-learn>=1.0.0",
     "openai>=1.0.0",
+    "tqdm>=4.60.0",
+    "matplotlib>=3.5.0",
 ]
 
 [project.optional-dependencies]
@@ -48,6 +50,9 @@ Repository = "https://github.com/Williamzcy0929/L-STAR"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["lstar*"]
+
+[tool.setuptools.package-data]
+lstar = ["resources/*.R"]
 
 [tool.black]
 line-length = 100

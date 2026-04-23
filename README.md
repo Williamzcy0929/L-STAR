@@ -40,7 +40,7 @@ The resulting consensus labels are reported as **L-STAR**, representing an ensem
 
 ## Installation
 
-Install from source (this Repo):
+Install this Repository:
 
 ```bash
 git clone https://github.com/Williamzcy0929/lstar.git
@@ -65,7 +65,7 @@ Required R packages:
 - `ggplot2`
 - `RColorBrewer`
 
-Install example:
+Install instructions:
 ```r
 install.packages(c("ggplot2", "RColorBrewer"), repos = "https://cloud.r-project.org")
 remotes::install_github("Winnie09/Palo", repos = "https://cloud.r-project.org")
@@ -79,7 +79,7 @@ For source checkouts, `scripts/install_palo.R` and `scripts/test_palo.R` are sti
 
 L-STAR supports two modes for spatial visualization:
 
-### Default Mode: Generate Images from CSV Files
+### Default Mode: Generate Spatial Domain Visualizations from CSV Files
 
 By default, L-STAR can generate spatial visualization images internally from spatial locations and domain assignments. With `use_palo=True`, images are rendered by R/ggplot2 using Palo-optimized palettes (one PNG per method, legend disabled):
 
@@ -102,7 +102,7 @@ print(df.head())
 # Generated images are saved to output_dir/generated_images/
 ```
 
-### Image Mode: Using Pre-generated Images
+### Image Mode: Using Pre-generated Spatial Domain Visualizations
 
 ```python
 import lstar
@@ -161,7 +161,7 @@ spot_3,1,1,1,2
 ...
 ```
 
-**Image Generation Process:**
+**Spatial Domain Visualization Generation Process:**
 - L-STAR internally generates one spatial visualization image per method column
 - With `use_palo=True`, palette optimization and plotting run through bundled R scripts (Palo + ggplot2)
 - Generated images are saved to `output_dir/generated_images/` with filenames matching method names (e.g., `GraphST.png`, `SpaGCN.png`)
@@ -172,7 +172,7 @@ spot_3,1,1,1,2
 - Set `use_palo=False` to disable Palo and use matplotlib/default color palettes
 - If Palo/R/ggplot dependencies are unavailable, L-STAR automatically falls back to matplotlib rendering
 
-### Image Mode: Pre-generated Images
+### Image Mode: Pre-generated Spatial Domain Visualizations
 
 The `image_dir` should contain:
 - `he.png` (or custom name with extensions .png, .jpg, .jpeg, or .pdf): H&E reference image (optional)

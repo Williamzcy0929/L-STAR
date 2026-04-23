@@ -47,7 +47,7 @@ def determine_optimal_k(
     method : str
         One of: "median_from_models", "mode_from_models", "silhouette", "gap_statistic"
     k_range : range or list
-        Valid range of k values
+        Valid range of k values (used by silhouette/gap_statistic methods)
     
     Returns:
     --------
@@ -57,22 +57,12 @@ def determine_optimal_k(
     if method not in valid_methods:
         raise ValueError(f"method must be one of {valid_methods}")
     
-    k_range = list(k_range) if isinstance(k_range, range) else k_range
-    
     if method in ["median_from_models", "mode_from_models"]:
         if pred_data_for_mode is None or pred_data_for_mode.empty:
             raise ValueError(f"pred_data_for_mode (matrix of model labels) is required for {method}")
         
         # Number of clusters implied by each model
         k_counts = [pred_data_for_mode[col].nunique() for col in pred_data_for_mode.columns]
-        
-        # Clip to the user-specified k_range to avoid wild k's
-        k_counts = [k for k in k_counts if k in k_range]
-        if len(k_counts) == 0:
-            raise ValueError(
-                f"No model-implied k falls inside k_range {list(k_range)}. "
-                f"Model k values: {[pred_data_for_mode[col].nunique() for col in pred_data_for_mode.columns]}"
-            )
         
         if method == "mode_from_models":
             # Most common k
@@ -89,7 +79,9 @@ def determine_optimal_k(
             'k_counts': k_counts
         }
     
-    elif method == "silhouette":
+    k_range = list(k_range) if isinstance(k_range, range) else k_range
+
+    if method == "silhouette":
         if distance_matrix is None:
             raise ValueError("distance_matrix is required for silhouette method")
         

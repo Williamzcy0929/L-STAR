@@ -20,9 +20,6 @@ CONSENSUS_CSV_NAME = "L_STAR_consensus.csv"
 # Default H&E image basename
 DEFAULT_HE_BASENAME = "he.png"
 
-# Default k selection range
-DEFAULT_K_RANGE = range(2, 16)
-
 # Default consensus parameters
 DEFAULT_REPS = 5
 DEFAULT_TOP_K = 5

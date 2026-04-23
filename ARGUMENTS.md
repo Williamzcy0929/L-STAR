@@ -21,9 +21,10 @@ The high-level entry point that runs the complete L-STAR pipeline: pairwise comp
 
 ```python
 def l_star(
-    image_dir: Union[str, Path],
+    image_dir: Union[str, Path, None] = None,
     dataset_name: str,
     *,
+    spatial_locations_csv: Union[str, Path, None] = None,
     assignments_csv: Union[str, Path, None] = None,
     id_col: Optional[str] = None,
     use_separate_csvs: bool = False,
@@ -39,19 +40,22 @@ def l_star(
     k_mode: Literal["fixed", "auto"] = "auto",
     fixed_k: Optional[int] = None,
     use_second_round: bool = False,
+    use_palo: bool = True,
+    he_image_path: Optional[Union[str, Path]] = None,
     **kwargs,
 ) -> pd.DataFrame
 ```
 
 ### Required Arguments
 
-#### `image_dir` (required)
-- **Type**: `str` or `Path`
-- **Description**: Directory containing H&E reference image and model output images
+#### `image_dir` (optional)
+- **Type**: `str` or `Path` or `None`
+- **Description**: Directory containing H&E reference image and model output images (pre-generated image mode)
 - **Supported Image Formats**: `.png`, `.jpg`, `.jpeg` (case-insensitive)
 - **Structure**:
   - H&E image: `he.png` (or `he.jpg`, `he.jpeg`) - optional
   - Model images: `ModelName.png`, `ModelName.jpg`, etc. - at least 2 required
+- **Required When**: `spatial_locations_csv` is not provided
 - **Example**: `"data/DLPFC/images"`
 
 #### `dataset_name` (required)
@@ -64,6 +68,25 @@ def l_star(
   - `"Stereo-seq Axolotl Brain"`
   - `"SlideV2 Mouse Embryo E8.5"`
   - `"SpatialMouseAtlas2020 (from SeqFISH dataset)"`
+
+### Image Generation Arguments (CSV Mode)
+
+#### `spatial_locations_csv` (optional, default: `None`)
+- **Type**: `str` or `Path` or `None`
+- **Description**: CSV containing coordinates for each spot/cell (columns: `id_col`, `x`, `y`)
+- **Required When**: `image_dir=None` (CSV image-generation mode)
+- **Example**: `"data/DLPFC/spatial_locations.csv"`
+
+#### `use_palo` (optional, default: `True`)
+- **Type**: `bool`
+- **Description**: Enable Palo-based color optimization and R/ggplot rendering for generated images
+- **When `True`**: L-STAR calls bundled R scripts (`run_palo.R`, `plot_spatial_with_palo.R`)
+- **When `False`**: Uses matplotlib/default palette rendering
+
+#### `he_image_path` (optional, default: `None`)
+- **Type**: `str` or `Path` or `None`
+- **Description**: Optional H&E image path to copy into generated image directory
+- **Only Used When**: generating images from CSVs
 
 ### Assignment Data Arguments
 
@@ -215,6 +238,11 @@ These arguments are passed through to underlying functions:
 - **Alternative**: Set `OPENAI_API_KEY` environment variable
 - **Example**: `"sk-..."`
 
+#### Runtime R script path overrides (optional)
+- **`LSTAR_RUN_PALO_SCRIPT`**: Absolute path override for `run_palo.R`
+- **`LSTAR_PLOT_SPATIAL_SCRIPT`**: Absolute path override for `plot_spatial_with_palo.R`
+- **Default behavior**: If unset, L-STAR uses packaged scripts from `lstar/resources/` and then local fallback paths
+
 #### `api_base` (optional)
 - **Type**: `str` or `None`
 - **Description**: Custom API base URL (for non-OpenAI endpoints)
@@ -261,7 +289,8 @@ These arguments are passed through to underlying functions:
 
 #### `k_range` (optional, default: `range(2, 16)`)
 - **Type**: `range` or `list`
-- **Description**: Valid range of k values for auto-determination
+- **Description**: Candidate range of k values for `silhouette`/`gap_statistic` auto-determination
+- **Note**: For `median_from_models` and `mode_from_models`, k is computed directly from selected models and is not clipped by `k_range`.
 - **Example**: `range(2, 16)` (default), `range(3, 20)`
 
 #### `ground_truth_col` (optional, default: `None`)

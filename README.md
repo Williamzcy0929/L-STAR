@@ -27,8 +27,8 @@ Based on the aggregated pairwise comparison outcomes, L-STAR selects a subset of
 
 This subset can be:
 
-* **Automatically determined** (by default): by choosing the top-k methods according to LLM-derived winning rates
-* **Manually specified**
+* **Manually specified**, or
+* **Automatically determined**, for example by choosing the top-k methods according to LLM-derived winning rates.
 
 This step filters out systematically underperforming methods while retaining complementary high-quality solutions, balancing robustness and diversity for the consensus stage.
 
@@ -40,7 +40,7 @@ The resulting consensus labels are reported as **L-STAR**, representing an ensem
 
 ## Installation
 
-Install this Repository:
+Install from source (this Repo):
 
 ```bash
 git clone https://github.com/Williamzcy0929/lstar.git
@@ -65,7 +65,7 @@ Required R packages:
 - `ggplot2`
 - `RColorBrewer`
 
-Install instructions:
+Install example:
 ```r
 install.packages(c("ggplot2", "RColorBrewer"), repos = "https://cloud.r-project.org")
 remotes::install_github("Winnie09/Palo", repos = "https://cloud.r-project.org")
@@ -79,7 +79,7 @@ For source checkouts, `scripts/install_palo.R` and `scripts/test_palo.R` are sti
 
 L-STAR supports two modes for spatial visualization:
 
-### Default Mode: Generate Spatial Domain Visualizations from CSV Files
+### Default Mode: Generate Images from CSV Files
 
 By default, L-STAR can generate spatial visualization images internally from spatial locations and domain assignments. With `use_palo=True`, images are rendered by R/ggplot2 using Palo-optimized palettes (one PNG per method, legend disabled):
 
@@ -102,7 +102,7 @@ print(df.head())
 # Generated images are saved to output_dir/generated_images/
 ```
 
-### Image Mode: Using Pre-generated Spatial Domain Visualizations
+### Image Mode: Using Pre-generated Images
 
 ```python
 import lstar
@@ -161,7 +161,7 @@ spot_3,1,1,1,2
 ...
 ```
 
-**Spatial Domain Visualization Generation Process:**
+**Image Generation Process:**
 - L-STAR internally generates one spatial visualization image per method column
 - With `use_palo=True`, palette optimization and plotting run through bundled R scripts (Palo + ggplot2)
 - Generated images are saved to `output_dir/generated_images/` with filenames matching method names (e.g., `GraphST.png`, `SpaGCN.png`)
@@ -172,7 +172,7 @@ spot_3,1,1,1,2
 - Set `use_palo=False` to disable Palo and use matplotlib/default color palettes
 - If Palo/R/ggplot dependencies are unavailable, L-STAR automatically falls back to matplotlib rendering
 
-### Image Mode: Pre-generated Spatial Domain Visualizations
+### Image Mode: Pre-generated Images
 
 The `image_dir` should contain:
 - `he.png` (or custom name with extensions .png, .jpg, .jpeg, or .pdf): H&E reference image (optional)
@@ -285,7 +285,7 @@ consensus_df = lstar.run_consensus_clustering(
 **Key Parameters:**
 - `selection_mode`: "manual" (use `model_names`) or "top_k" (select by ranking)
 - `k_mode`: "fixed" (use `fixed_k`) or "auto" (determine from models)
-- `k_method`: "median_from_models" or "mode_from_models" for auto k selection
+- `k_method`: "median_from_models" or "mode_from_models" for auto k selection (default is unconstrained by `k_range`), or "silhouette"/"gap_statistic" (uses `k_range`)
 - `ground_truth_col`: Optional column name for ARI evaluation
 
 ## Output Files

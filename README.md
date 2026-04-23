@@ -27,8 +27,8 @@ Based on the aggregated pairwise comparison outcomes, L-STAR selects a subset of
 
 This subset can be:
 
-* **Manually specified**, or
-* **Automatically determined**, for example by choosing the top-k methods according to LLM-derived winning rates.
+* **Automatically determined** (by default): by choosing the top-k methods according to LLM-derived winning rates
+* **Manually specified**
 
 This step filters out systematically underperforming methods while retaining complementary high-quality solutions, balancing robustness and diversity for the consensus stage.
 

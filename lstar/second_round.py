@@ -52,7 +52,7 @@ CRITICAL RULES:
    - Do NOT favor models just because their clusters look smoother or less fragmented.
 
 2. Use the H&E image as biological ground (if H&E image is provided).
-   - Check whether the main tissue structures and boundaries in the H&E (if H&E image is provided) (e.g., layers, regions, sharp tissue edges, white-matter/grey-matter boundaries, anatomical compartments) are reasonably respected by each model's clustering.
+   - Check whether the main tissue structures and boundaries in the H&E (if H&E image is provided) (e.g., layers, regions, sharp tissue edges, boundaries between histologically distinct compartments) are reasonably respected by each model's clustering.
    - A model is suspicious ("poison pill") if it clearly ignores major boundaries that are obvious in the H&E, especially when other models agree with each other.
 
 3. Evaluate MODELS AS A GROUP.

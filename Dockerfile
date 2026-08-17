@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y \
     libgit2-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install R packages needed for Palo
-RUN R -e "install.packages(c('remotes', 'devtools', 'RColorBrewer'), repos='https://cloud.r-project.org')"
+# Install R packages needed for Palo + ggplot rendering
+RUN R -e "install.packages(c('remotes', 'devtools', 'RColorBrewer', 'ggplot2'), repos='https://cloud.r-project.org')"
 
 # Install Palo from GitHub (pin to main branch, or use a specific commit/tag)
 # Using remotes::install_github for better dependency handling

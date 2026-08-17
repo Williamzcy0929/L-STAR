@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lstar.dev/schemas/domain-annotation/3.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["domains"],
+  "properties": {
+    "domains": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["domain_id", "domain_name"],
+        "properties": {
+          "domain_id": {"type": "string", "minLength": 1},
+          "domain_name": {"type": "string", "minLength": 1, "maxLength": 120}
+        }
+      }
+    }
+  }
+}

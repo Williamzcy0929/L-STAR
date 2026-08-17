@@ -1,0 +1,70 @@
+# macOS and editor metadata
+.DS_Store
+._*
+.vscode/
+.idea/
+*.swp
+*~
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+.Renviron
+
+# Python environments, caches, and build artifacts
+.venv*/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# R session state
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Jupyter temporary files
+.ipynb_checkpoints/
+
+# Large scientific data objects
+*.h5
+*.h5ad
+*.hdf5
+*.loom
+*.mtx
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.rds
+*.Rds
+*.tif
+*.tiff
+
+# Generated run artifacts: examples ship inputs and small summaries only
+/lstar_output/
+**/crops/
+**/crops_*/
+**/generated_images/
+**/generated_images_for_second_round/
+**/annotation_artifacts/
+*.jsonl
+
+# Not published: local test suite and example datasets/drivers
+/tests/
+/example/

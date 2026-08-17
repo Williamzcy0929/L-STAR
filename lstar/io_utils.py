@@ -3,9 +3,11 @@
 import json
 import csv
 import logging
+import os
 import re
+import tempfile
 from pathlib import Path
-from typing import Optional, Sequence, Dict, Any, Tuple, Union, List
+from typing import Optional, Sequence, Dict, Any, Tuple, Union, List, Mapping
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -36,7 +38,7 @@ def normalize_name(name: str) -> str:
 
 def read_ranking_csv(csv_path: Path) -> pd.DataFrame:
     """
-    Read ranking CSV and validate required columns.
+    Read a ranking CSV and validate its model and sortable-score columns.
     
     Raises:
         FileNotFoundError: If CSV doesn't exist
@@ -54,12 +56,16 @@ def read_ranking_csv(csv_path: Path) -> pd.DataFrame:
         # Use first column as model column
         logger.warning(f"Ranking CSV {csv_path} missing 'model' column, using first column: {df.columns[0]}")
     
-    # Check for win_rate column
-    if "win_rate" not in df.columns and "winning_rate" not in df.columns and "WinningRate" not in df.columns:
+    score_columns = {"score", "win_rate", "winning_rate", "WinningRate"}
+    if not score_columns.intersection(df.columns):
         if len(df.columns) < 2:
-            raise ValueError(f"Ranking CSV {csv_path} missing win_rate column")
-        # Use last column as win_rate
-        logger.warning(f"Ranking CSV {csv_path} missing 'win_rate' column, using last column: {df.columns[-1]}")
+            raise ValueError(f"Ranking CSV {csv_path} missing a score column")
+        logger.warning(
+            "Ranking CSV %s missing a recognized score column, using last "
+            "column: %s",
+            csv_path,
+            df.columns[-1],
+        )
     
     return df
 
@@ -182,6 +188,35 @@ def append_jsonl(path: Path, obj: Dict[str, Any]) -> None:
     """Append a JSON object to a JSONL file."""
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+
+def write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
+    """Write a JSON object atomically in the destination directory."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(destination.parent),
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            json.dump(
+                dict(payload),
+                handle,
+                ensure_ascii=False,
+                indent=2,
+                allow_nan=False,
+            )
+            handle.write("\n")
+        os.replace(str(temp_path), str(destination))
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
 
 
 def read_jsonl(path: Path) -> list[Dict[str, Any]]:
@@ -534,4 +569,3 @@ def write_consensus_csv(
     
     df.to_csv(output_path, index=False)
     logger.info(f"Wrote consensus CSV: {output_path} ({len(df)} rows)")
-

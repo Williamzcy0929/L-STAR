@@ -566,18 +566,24 @@ def select_top_models(
     top_k: int = DEFAULT_TOP_K,
     mode: Literal["fixed", "elbow"] = "fixed",
 ) -> List[str]:
-    """Select top K models from ranking DataFrame."""
+    """Select top models and include every model tied at the cutoff."""
     logger.info(f"Selecting top models (mode={mode}, top_k={top_k})")
+
+    if top_k <= 0:
+        raise ValueError(f"top_k must be positive, got {top_k}")
     
-    # Get win_rate column
-    if "win_rate" in ranking_df.columns:
-        win_col = "win_rate"
+    # Prefer the comparison-neutral score used by all-wise rankings, while
+    # preserving support for existing pairwise ranking files.
+    if "score" in ranking_df.columns:
+        score_col = "score"
+    elif "win_rate" in ranking_df.columns:
+        score_col = "win_rate"
     elif "winning_rate" in ranking_df.columns:
-        win_col = "winning_rate"
+        score_col = "winning_rate"
     elif "WinningRate" in ranking_df.columns:
-        win_col = "WinningRate"
+        score_col = "WinningRate"
     else:
-        win_col = ranking_df.columns[-1]
+        score_col = ranking_df.columns[-1]
     
     # Get model column
     if "model" in ranking_df.columns:
@@ -587,14 +593,40 @@ def select_top_models(
     else:
         model_col = ranking_df.columns[0]
     
-    models = ranking_df.sort_values(win_col, ascending=False)
+    models = ranking_df.sort_values(score_col, ascending=False, kind="stable")
     model_list = models[model_col].tolist()
-    win_rates = models[win_col].tolist()
+    scores = models[score_col].tolist()
+
+    def include_cutoff_ties(k: int) -> List[str]:
+        """Return at least k models, extending through cutoff-score ties."""
+        k = min(k, len(model_list))
+        if k == 0:
+            return []
+
+        cutoff_score = scores[k - 1]
+        selected_count = k
+        while (
+            selected_count < len(model_list) and
+            scores[selected_count] == cutoff_score
+        ):
+            selected_count += 1
+
+        selected = model_list[:selected_count]
+        if selected_count > k:
+            logger.info(
+                "Expanded selection from %d to %d models because %d models "
+                "were tied at cutoff score=%s",
+                k,
+                selected_count,
+                selected_count - k + 1,
+                cutoff_score,
+            )
+        return selected
     
     if mode == "fixed":
         k = min(top_k, len(model_list))
-        top_models = model_list[:k]
-        logger.info(f"Selected top {k} models (fixed): {top_models}")
+        top_models = include_cutoff_ties(k)
+        logger.info(f"Selected top {len(top_models)} models (fixed): {top_models}")
         return top_models
     
     elif mode == "elbow":
@@ -603,14 +635,14 @@ def select_top_models(
         else:
             drops = []
             for i in range(len(model_list) - 1):
-                drop = win_rates[i] - win_rates[i+1]
+                drop = scores[i] - scores[i+1]
                 drops.append((i+1, drop))
             
             elbow_idx = max(drops, key=lambda x: x[1])[0]
             k = max(3, min(elbow_idx, top_k))
         
-        top_models = model_list[:k]
-        logger.info(f"Selected top {k} models (elbow): {top_models}")
+        top_models = include_cutoff_ties(k)
+        logger.info(f"Selected top {len(top_models)} models (elbow): {top_models}")
         return top_models
     
     else:
@@ -647,7 +679,7 @@ def run_pairwise_comparisons(
     dataset_name : str
         Background information about the dataset name provided in LLM prompts.
         This helps the LLM understand the context of the spatial transcriptomics data.
-        Example: "DLPFC (from 10X Visium Human Brain)" or "STARmap Mouse Ventricular Cardiomyocytes"
+        Example: "DLPFC (from 10X Visium Human Brain)" or "STARmap Mouse Visual Cortex"
     
     reps : int
         Number of pairwise comparison repetitions
@@ -823,4 +855,3 @@ def run_pairwise_comparisons(
     ranking_df = compute_winning_rates(jsonl_files, ranking_csv_path)
     
     return ranking_df, pairwise_dir, ranking_csv_path
-

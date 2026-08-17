@@ -1,16 +1,24 @@
-"""High-level L-STAR pipeline combining pairwise comparisons and consensus clustering."""
+"""High-level L-STAR comparison and consensus-clustering pipeline."""
 
 import logging
 from pathlib import Path
-from typing import Optional, Sequence, Literal, Union
+from typing import Literal, Optional, Sequence, Union
 
 import pandas as pd
 
-from lstar.pairwise import run_pairwise_comparisons
+from lstar.allwise import run_allwise_comparisons
 from lstar.consensus import run_consensus_clustering
-from lstar.config import DEFAULT_OUTPUT_DIR
-from lstar.io_utils import read_second_round_results
+from lstar.config import (
+    DEFAULT_HE_BASENAME,
+    DEFAULT_MODEL_NAME,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_PAIRWISE_REASONING_EFFORT,
+    DEFAULT_PAIRWISE_TEMPERATURE,
+)
 from lstar.image_generation import generate_images_from_csvs
+from lstar.io_utils import read_second_round_results
+from lstar.pairwise import run_pairwise_comparisons
+from lstar.types import ComparisonResult
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +34,7 @@ def l_star(
     assignments_dir: Union[str, Path, None] = None,
     assignment_csv_list: Optional[Sequence[Union[str, Path]]] = None,
     output_dir: Union[str, Path] = DEFAULT_OUTPUT_DIR,
+    mode: Literal["performance", "cost"] = "performance",
     simple_mode: bool = True,
     reps: int = 5,
     top_k: int = 5,
@@ -40,11 +49,11 @@ def l_star(
     **kwargs,
 ) -> pd.DataFrame:
     """
-    High-level L-STAR pipeline: pairwise LLM comparisons + ranking + consensus.
+    High-level L-STAR pipeline: LLM comparison + ranking + consensus.
     
     This function:
       1) Optionally generates images from spatial locations and assignments (if spatial_locations_csv provided)
-      2) Runs pairwise LLM comparisons to rank models
+      2) Runs performance-first pairwise or cost-first all-wise comparisons
       3) Uses the ranking to select models for consensus clustering
       4) Performs consensus clustering and outputs L-STAR assignments
     
@@ -53,7 +62,7 @@ def l_star(
     dataset_name : str
         Background information about the dataset name provided in LLM prompts.
         This helps the LLM understand the context of the spatial transcriptomics data.
-        Example: "DLPFC (from 10X Visium Human Brain)" or "STARmap Mouse Ventricular Cardiomyocytes"
+        Example: "DLPFC (from 10X Visium Human Brain)" or "STARmap Mouse Visual Cortex"
     
     image_dir : str or Path, optional
         Directory containing H&E and model output images.
@@ -103,27 +112,36 @@ def l_star(
     
     output_dir : str or Path
         Base directory for all outputs:
-          - output_dir / "pairwise" / ...  (pairwise comparison cache)
+          - output_dir / "pairwise" / ...  (performance-mode artifacts)
+          - output_dir / "allwise" / ...   (cost-mode artifacts)
           - output_dir / "ranking.csv"     (model ranking)
           - output_dir / "L_STAR_consensus.csv"  (final consensus)
+          - output_dir / "lstar_run_manifest.json"  (selected-method provenance)
     
+    mode : {"performance", "cost"}, default "performance"
+        Comparison implementation. Performance mode uses exhaustive pairwise
+        comparisons. Cost mode ranks all candidate methods in one request per
+        repetition.
+
     simple_mode : bool
-        If True, use simple prompts for pairwise comparisons.
+        If True, use simple prompts for comparisons.
         If False, use complex prompts with bias warnings.
     
     reps : int
-        Number of pairwise comparison repetitions
+        Number of comparison repetitions
     
     top_k : int
-        Number of top models to consider (used in pairwise ranking and/or consensus selection)
+        Minimum number of top models to consider. All models tied at the
+        cutoff score are included.
     
     top_k_mode : {"fixed", "elbow"}
-        Mode for top-k selection in pairwise ranking
+        Mode for top-k selection in ranking
     
     selection_mode : {"manual", "top_k"}
         How to select models for consensus:
         - "manual": Use model_names parameter
-        - "top_k": Select top k models from ranking by win_rate (default)
+        - "top_k": Select at least top k models from the ranking score,
+          including all models tied at the cutoff (default)
     
     use_second_round : bool, default False
         If True, read second-round reasoning JSON file (if present) and use its selected models for consensus.
@@ -150,13 +168,13 @@ def l_star(
         Fixed number of clusters (used when k_mode="fixed")
     
     **kwargs
-        Additional arguments passed to run_pairwise_comparisons and run_consensus_clustering:
+        Additional arguments passed to comparison and consensus functions:
         - api_key, api_base, model_name
         - pairwise_temperature, pairwise_reasoning_effort
         - k_method, k_range, ground_truth_col, etc.
         
         Note: Second-round reasoning parameters (second_round_temperature, second_round_reasoning_effort)
-        are handled by the separate second_round.py module, not by run_pairwise_comparisons.
+        are handled by the separate second_round.py module.
     
     Returns
     -------
@@ -211,6 +229,10 @@ def l_star(
     # Validate required arguments
     if dataset_name is None:
         raise ValueError("dataset_name is required")
+    if mode not in {"performance", "cost"}:
+        raise ValueError(
+            f"Unknown comparison mode: {mode}. Expected 'performance' or 'cost'."
+        )
     
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -254,26 +276,32 @@ def l_star(
             raise NotADirectoryError(f"Image directory not found: {image_dir}")
         logger.info(f"Using pre-generated images from: {image_dir}")
     
-    # Extract kwargs for pairwise and consensus
-    pairwise_kwargs = {
+    # Extract kwargs for comparison and consensus stages.
+    skip_comparisons = kwargs.pop(
+        "skip_comparisons",
+        kwargs.pop("skip_pairwise", False),
+    )
+    comparison_kwargs = {
         "image_dir": image_dir,
         "dataset_name": dataset_name,
         "reps": reps,
-        "top_k": top_k,
-        "top_k_mode": top_k_mode,
+        "he_basename": kwargs.pop("he_basename", DEFAULT_HE_BASENAME),
         "simple_mode": simple_mode,
         "output_dir": output_dir,
         "force_rerun": kwargs.pop("force_rerun", False),
-        "skip_pairwise": kwargs.pop("skip_pairwise", False),
-        "model_name": kwargs.pop("model_name", "gpt-5.1-thinking"),
-        "pairwise_temperature": kwargs.pop("pairwise_temperature", 1.0),
-        "pairwise_reasoning_effort": kwargs.pop("pairwise_reasoning_effort", "medium"),
+        "model_name": kwargs.pop("model_name", DEFAULT_MODEL_NAME),
+        "pairwise_temperature": kwargs.pop(
+            "pairwise_temperature", DEFAULT_PAIRWISE_TEMPERATURE
+        ),
+        "pairwise_reasoning_effort": kwargs.pop(
+            "pairwise_reasoning_effort", DEFAULT_PAIRWISE_REASONING_EFFORT
+        ),
         "api_key": kwargs.pop("api_key", None),
         "api_base": kwargs.pop("api_base", None),
-        "disable_cache": kwargs.pop("disable_cache", False),
     }
+    disable_cache = kwargs.pop("disable_cache", False)
     
-    # Build initial consensus_kwargs (will be updated after pairwise phase)
+    # Build initial consensus_kwargs (updated after the comparison phase).
     consensus_kwargs = {
         "output_dir": output_dir,
         "selection_mode": selection_mode,  # Will be updated based on priority
@@ -321,14 +349,36 @@ def l_star(
     if kwargs:
         logger.warning(f"Unused keyword arguments: {list(kwargs.keys())}")
     
-    # Step 1: Run pairwise comparisons
+    # Step 1: Run the selected comparison implementation.
     logger.info("\n" + "=" * 60)
-    logger.info("STEP 1: Pairwise Comparisons")
+    logger.info("STEP 1: Model Comparisons (%s mode)", mode)
     logger.info("=" * 60)
-    
-    ranking_df, pairwise_dir, ranking_csv_path = run_pairwise_comparisons(**pairwise_kwargs)
-    
-    logger.info(f"Pairwise comparisons complete. Ranking CSV: {ranking_csv_path}")
+
+    if mode == "performance":
+        ranking_df, artifact_dir, ranking_csv_path = run_pairwise_comparisons(
+            **comparison_kwargs,
+            top_k=top_k,
+            top_k_mode=top_k_mode,
+            skip_pairwise=skip_comparisons,
+            disable_cache=disable_cache,
+        )
+        comparison_result = ComparisonResult(
+            ranking_df=ranking_df,
+            ranking_csv_path=ranking_csv_path,
+            artifact_dir=artifact_dir,
+            score_column="win_rate",
+        )
+    else:
+        comparison_result = run_allwise_comparisons(
+            **comparison_kwargs,
+            skip_comparisons=skip_comparisons,
+        )
+
+    ranking_csv_path = comparison_result.ranking_csv_path
+    logger.info(
+        "Comparisons complete. Ranking CSV: %s",
+        comparison_result.ranking_csv_path,
+    )
     
     # Determine model selection based on priority: manual > second-round JSON > top-k
     # Priority 1: Manual override (explicit by user)
@@ -355,7 +405,7 @@ def l_star(
             final_model_names = None
             final_top_k = top_k
     
-    # Priority 3: Default: top-k winning-rate models (no second round)
+    # Priority 3: Default top-k selection from the comparison ranking.
     else:
         final_selection_mode = "top_k"
         final_model_names = None
@@ -379,10 +429,10 @@ def l_star(
     logger.info("L-STAR PIPELINE COMPLETE")
     logger.info("=" * 60)
     logger.info(f"Output directory: {output_dir}")
-    logger.info(f"  - Pairwise results: {pairwise_dir}")
+    logger.info(f"  - Comparison results: {comparison_result.artifact_dir}")
     logger.info(f"  - Ranking CSV: {ranking_csv_path}")
     logger.info(f"  - Consensus CSV: {output_dir / 'L_STAR_consensus.csv'}")
+    logger.info(f"  - Run manifest: {output_dir / 'lstar_run_manifest.json'}")
     logger.info("=" * 60)
     
     return consensus_df
-

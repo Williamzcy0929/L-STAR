@@ -167,7 +167,7 @@ def l_star(
 
 #### `top_k` (optional, default: `5`)
 - **Type**: `int`
-- **Description**: Number of top models to consider
+- **Description**: Minimum number of top models to consider. If methods are tied at the cutoff winning rate, all tied methods are included.
 - **Usage**:
   - Used in pairwise ranking for top-k selection
   - Used in consensus clustering when `selection_mode="top_k"`
@@ -178,8 +178,8 @@ def l_star(
 - **Type**: `Literal["fixed", "elbow"]`
 - **Description**: Method for selecting top-k models
 - **Options**:
-  - `"fixed"`: Select exactly `top_k` models
-  - `"elbow"`: Use elbow detection to find optimal k (at most `top_k`)
+  - `"fixed"`: Select at least `top_k` models, including all cutoff ties
+  - `"elbow"`: Use elbow detection to find optimal k, then include all methods tied at the selected cutoff
 - **Example**: `"fixed"` (default), `"elbow"` (adaptive)
 
 ### Model Selection Arguments
@@ -189,7 +189,7 @@ def l_star(
 - **Description**: How to select models for consensus clustering
 - **Options**:
   - `"manual"`: Use `model_names` parameter (explicit list)
-  - `"top_k"`: Select top k models from ranking by win_rate (default)
+  - `"top_k"`: Select at least top k models from ranking by win_rate and include all cutoff ties (default)
 - **Priority**: Manual override > Second-round reasoning > Top-k
 - **Example**: `"top_k"` (default), `"manual"` (explicit selection)
 
@@ -400,7 +400,7 @@ def run_second_round_reasoning(
 
 #### `top_k` (required)
 - **Type**: `int`
-- **Description**: Number of top models to consider for second-round screening
+- **Description**: Minimum number of top models to consider for second-round screening; all methods tied at the cutoff winning rate are included
 
 #### `model_name` (required)
 - **Type**: `str`

@@ -16,6 +16,7 @@ DEFAULT_OUTPUT_DIR = "lstar_output"
 PAIRWISE_SUBDIR = "pairwise"
 RANKING_CSV_NAME = "ranking.csv"
 CONSENSUS_CSV_NAME = "L_STAR_consensus.csv"
+RUN_MANIFEST_NAME = "lstar_run_manifest.json"
 
 # Default H&E image basename
 DEFAULT_HE_BASENAME = "he.png"
@@ -24,4 +25,3 @@ DEFAULT_HE_BASENAME = "he.png"
 DEFAULT_REPS = 5
 DEFAULT_TOP_K = 5
 DEFAULT_K_RANGE = range(2, 30)
-

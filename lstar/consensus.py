@@ -15,6 +15,7 @@ from lstar.config import (
     DEFAULT_OUTPUT_DIR,
     CONSENSUS_CSV_NAME,
     DEFAULT_K_RANGE,
+    RUN_MANIFEST_NAME,
 )
 from lstar.io_utils import (
     read_ranking_csv,
@@ -24,7 +25,9 @@ from lstar.io_utils import (
     read_combined_assignments_csv,
     build_name_mappings,
     match_models_with_fuzzy_matching,
+    write_json_atomic,
 )
+from lstar.pairwise import select_top_models
 
 logger = logging.getLogger(__name__)
 
@@ -327,7 +330,7 @@ def run_consensus_clustering(
     Parameters
     ----------
     ranking_csv : str or Path
-        Path to ranking CSV with model names and win rates
+        Path to ranking CSV with model names and sortable comparison scores
     
     assignments_csv : str or Path, optional
         Path to a single CSV file containing all model assignments (one column per model).
@@ -361,7 +364,8 @@ def run_consensus_clustering(
         Manually specified model names (required if selection_mode="manual")
     
     top_k : int, optional
-        Number of top models to select (used if selection_mode="top_k")
+        Minimum number of top models to select. Models tied at the cutoff
+        score are also selected (used if selection_mode="top_k").
     
     selection_mode : {"manual", "top_k"}
         How to select models: "manual" uses model_names, "top_k" selects from ranking
@@ -416,37 +420,14 @@ def run_consensus_clustering(
     elif selection_mode == "top_k":
         if top_k is None or top_k <= 0:
             raise ValueError(f"top_k must be positive, got {top_k}")
-        
-        # Get win_rate column
-        if "win_rate" in ranking_df.columns:
-            win_col = "win_rate"
-        elif "winning_rate" in ranking_df.columns:
-            win_col = "winning_rate"
-        elif "WinningRate" in ranking_df.columns:
-            win_col = "WinningRate"
-        else:
-            win_col = ranking_df.columns[-1]
-        
-        # Get model column
-        if "model" in ranking_df.columns:
-            model_col = "model"
-        elif "Model" in ranking_df.columns:
-            model_col = "Model"
-        else:
-            model_col = ranking_df.columns[0]
-        
-        sorted_models = ranking_df.sort_values(win_col, ascending=False)
-        available_count = len(sorted_models)
-        
-        if top_k > available_count:
-            logger.warning(
-                f"top_k={top_k} is larger than available models ({available_count}), "
-                f"using all {available_count} models"
-            )
-            top_k = available_count
-        
-        selected_models = sorted_models[model_col].head(top_k).tolist()
-        logger.info(f"Selected top {len(selected_models)} models by win_rate: {selected_models}")
+
+        selected_models = select_top_models(ranking_df, top_k, mode="fixed")
+        logger.info(
+            "Selected %d models by ranking score (requested top_k=%d): %s",
+            len(selected_models),
+            top_k,
+            selected_models,
+        )
     
     else:
         raise ValueError(f"Unknown selection_mode: {selection_mode}")
@@ -501,6 +482,14 @@ def run_consensus_clustering(
             combined_csv_path=combined_csv_path,
             require_images=False,  # Images are not required for consensus clustering
         )
+        consensus_method_columns = [
+            str(model_to_assignment_col[model_name])
+            for model_name in selected_models
+        ]
+        selected_model_to_assignment_column = {
+            str(model_name): str(model_to_assignment_col[model_name])
+            for model_name in selected_models
+        }
         
         # Get ID values from combined CSV
         id_values = combined_df[id_col].values
@@ -522,6 +511,12 @@ def run_consensus_clustering(
         
     else:
         # EXISTING MODE: Separate CSV files per model (unchanged behavior)
+        consensus_method_columns = [
+            str(model_name) for model_name in selected_models
+        ]
+        selected_model_to_assignment_column = {
+            str(model_name): str(model_name) for model_name in selected_models
+        }
         if assignment_csv_list is not None:
             assignment_paths = [Path(p) for p in assignment_csv_list]
             assignment_dfs = read_assignment_csvs(assignment_paths, model_names=selected_models)
@@ -653,6 +648,40 @@ def run_consensus_clustering(
         id_column_name=id_col,
         keep_original_columns=False,
     )
+
+    selected_models = [str(model_name) for model_name in selected_models]
+    resolved_output_dir = output_dir.expanduser().resolve()
+    resolved_output_csv = output_csv.expanduser().resolve()
+    run_manifest = {
+        "id_col": str(id_col),
+        "method_columns": consensus_method_columns,
+        "selected_models": selected_models,
+        "selected_model_to_assignment_column": selected_model_to_assignment_column,
+        "lstar_consensus_csv": str(resolved_output_csv),
+        "output_dir": str(resolved_output_dir),
+        "consensus_column": "L-STAR",
+        "selection_mode": str(selection_mode),
+        "assignment_source_mode": (
+            "separate_csvs" if use_separate_csvs else "combined_csv"
+        ),
+    }
+    if assignments_csv is not None:
+        run_manifest["assignments_csv"] = str(
+            Path(assignments_csv).expanduser().resolve()
+        )
+    if assignments_dir is not None:
+        run_manifest["assignments_dir"] = str(
+            Path(assignments_dir).expanduser().resolve()
+        )
+    if assignment_csv_list is not None:
+        run_manifest["assignment_csv_list"] = [
+            str(Path(path).expanduser().resolve()) for path in assignment_csv_list
+        ]
+    write_json_atomic(resolved_output_dir / RUN_MANIFEST_NAME, run_manifest)
+
+    consensus_df.attrs["selected_models"] = selected_models
+    consensus_df.attrs["method_columns"] = list(consensus_method_columns)
+    consensus_df.attrs["lstar_run_manifest"] = run_manifest
     
     logger.info(f"Consensus clustering complete. Output: {output_csv}")
     logger.info(f"  - Models used: {selected_models}")
@@ -661,4 +690,3 @@ def run_consensus_clustering(
         logger.info(f"  - ARI={consensus_result['consensus_ari']:.4f}")
     
     return consensus_df
-

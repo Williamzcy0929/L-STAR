@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lstar.dev/schemas/feature-resolution-plan/1.2.0",
+  "$defs": {
+    "outputField": {
+      "type": "string",
+      "enum": [
+        "parsed_feature_id", "original_feature_version", "selected_namespace",
+        "feature_level", "source_taxon_id", "source_assembly",
+        "source_database", "source_database_version", "source_gene_id",
+        "source_gene_symbol", "source_transcript_id", "parent_gene_id",
+        "canonical_source_gene_id", "target_gene_id", "target_gene_symbol",
+        "target_taxon_id", "homology_type", "orthology_confidence",
+        "orthology_evidence_source", "chrom", "start", "end", "strand",
+        "sequence_sha256"
+      ]
+    },
+    "outputMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource_field", "output_field"],
+      "properties": {
+        "resource_field": {"type": "string", "minLength": 1},
+        "output_field": {"$ref": "#/$defs/outputField"}
+      }
+    },
+    "coordinateFields": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_chrom", "input_start", "input_end", "input_strand",
+        "resource_chrom", "resource_start", "resource_end", "resource_strand"
+      ],
+      "properties": {
+        "input_chrom": {"type": "string", "minLength": 1},
+        "input_start": {"type": "string", "minLength": 1},
+        "input_end": {"type": "string", "minLength": 1},
+        "input_strand": {"type": ["string", "null"]},
+        "resource_chrom": {"type": "string", "minLength": 1},
+        "resource_start": {"type": "string", "minLength": 1},
+        "resource_end": {"type": "string", "minLength": 1},
+        "resource_strand": {"type": ["string", "null"]}
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "hypotheses", "selected_hypothesis_id", "workflow_hypothesis_confidence",
+    "selected_pilot_ids", "recipe", "decision_reason", "rejected_hypotheses",
+    "required_resources"
+  ],
+  "properties": {
+    "hypotheses": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hypothesis_id", "feature_type", "feature_level", "possible_origin",
+          "confidence", "required_evidence"
+        ],
+        "properties": {
+          "hypothesis_id": {"type": "string", "pattern": "^hypothesis_[1-6]$"},
+          "feature_type": {"type": "string", "minLength": 1},
+          "feature_level": {
+            "type": "string",
+            "enum": ["gene", "transcript", "probe", "peak", "antibody", "control", "mixed", "unknown"]
+          },
+          "possible_origin": {"type": "string", "minLength": 1},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "required_evidence": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "selected_hypothesis_id": {"type": ["string", "null"]},
+    "workflow_hypothesis_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "selected_pilot_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "recipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recipe_id", "recipe_version", "input_feature_level", "source_taxon_id",
+        "source_assembly", "annotation_representation", "resolution_steps",
+        "validation_rules", "failure_policy"
+      ],
+      "properties": {
+        "recipe_id": {"type": "string", "minLength": 1, "maxLength": 100},
+        "recipe_version": {"type": "string", "const": "1.0"},
+        "input_feature_level": {
+          "type": "string",
+          "enum": ["gene", "transcript", "probe", "peak", "antibody", "control", "mixed", "unknown"]
+        },
+        "source_taxon_id": {"type": ["integer", "null"], "minimum": 1},
+        "source_assembly": {"type": ["string", "null"]},
+        "annotation_representation": {"type": "string", "enum": ["source_gene", "target_ortholog", "none"]},
+        "resolution_steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["step_id", "operation", "input_field", "output_field", "method", "preserve_version", "reason"],
+                "properties": {
+                  "step_id": {"type": "string", "minLength": 1},
+                  "operation": {"type": "string", "const": "derive_field"},
+                  "input_field": {"type": "string", "minLength": 1},
+                  "output_field": {"$ref": "#/$defs/outputField"},
+                  "method": {"type": "string", "enum": ["copy", "strip_terminal_version", "strip_terminal_integer_suffix"]},
+                  "preserve_version": {"type": "boolean"},
+                  "reason": {"type": "string", "minLength": 1}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["step_id", "operation", "input_field", "output_field", "method", "pattern", "capture_group", "preserve_version", "reason"],
+                "properties": {
+                  "step_id": {"type": "string", "minLength": 1},
+                  "operation": {"type": "string", "const": "derive_field"},
+                  "input_field": {"type": "string", "minLength": 1},
+                  "output_field": {"$ref": "#/$defs/outputField"},
+                  "method": {"type": "string", "const": "regex_capture"},
+                  "pattern": {"type": "string", "minLength": 1, "maxLength": 500},
+                  "capture_group": {"type": ["string", "integer"]},
+                  "preserve_version": {"type": "boolean"},
+                  "reason": {"type": "string", "minLength": 1}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["step_id", "operation", "input_field", "output_field", "method", "delimiter", "token_index", "preserve_version", "reason"],
+                "properties": {
+                  "step_id": {"type": "string", "minLength": 1},
+                  "operation": {"type": "string", "const": "derive_field"},
+                  "input_field": {"type": "string", "minLength": 1},
+                  "output_field": {"$ref": "#/$defs/outputField"},
+                  "method": {"type": "string", "const": "split_token"},
+                  "delimiter": {"type": "string", "minLength": 1, "maxLength": 20},
+                  "token_index": {"type": "integer"},
+                  "preserve_version": {"type": "boolean"},
+                  "reason": {"type": "string", "minLength": 1}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["step_id", "operation", "input_field", "resource_id", "resource_field", "output_mappings", "reason"],
+                "properties": {
+                  "step_id": {"type": "string", "minLength": 1},
+                  "operation": {"type": "string", "const": "join_resource"},
+                  "input_field": {"type": "string", "minLength": 1},
+                  "resource_id": {"type": "string", "minLength": 1},
+                  "resource_field": {"type": "string", "minLength": 1},
+                  "output_mappings": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/outputMapping"}},
+                  "reason": {"type": "string", "minLength": 1}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["step_id", "operation", "resource_id", "resource_field", "output_mappings", "reason"],
+                "properties": {
+                  "step_id": {"type": "string", "minLength": 1},
+                  "operation": {"type": "string", "const": "join_resource_by_position"},
+                  "resource_id": {"type": "string", "minLength": 1},
+                  "resource_field": {"type": "string", "minLength": 1},
+                  "output_mappings": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/outputMapping"}},
+                  "reason": {"type": "string", "minLength": 1}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["step_id", "operation", "resource_id", "output_mappings", "coordinate_fields", "reason"],
+                "properties": {
+                  "step_id": {"type": "string", "minLength": 1},
+                  "operation": {"type": "string", "const": "interval_overlap_resource"},
+                  "resource_id": {"type": "string", "minLength": 1},
+                  "output_mappings": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/outputMapping"}},
+                  "coordinate_fields": {"$ref": "#/$defs/coordinateFields"},
+                  "reason": {"type": "string", "minLength": 1}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["step_id", "operation", "input_field", "method", "reason"],
+                "properties": {
+                  "step_id": {"type": "string", "minLength": 1},
+                  "operation": {"type": "string", "const": "set_declared_identity"},
+                  "input_field": {"type": "string", "minLength": 1},
+                  "method": {"type": "string", "enum": ["gene_symbol", "gene_id", "transcript_id", "non_gene"]},
+                  "reason": {"type": "string", "minLength": 1}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["step_id", "operation", "reason"],
+                "properties": {
+                  "step_id": {"type": "string", "minLength": 1},
+                  "operation": {"type": "string", "const": "mark_unresolved"},
+                  "reason": {"type": "string", "minLength": 1}
+                }
+              }
+            ]
+          }
+        },
+        "validation_rules": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimum_exact_match_rate", "minimum_unique_mapping_rate", "minimum_annotation_eligible_rate", "maximum_ambiguous_mapping_rate", "require_taxon_consistency", "require_assembly_consistency"],
+          "properties": {
+            "minimum_exact_match_rate": {"type": "number", "minimum": 0, "maximum": 1},
+            "minimum_unique_mapping_rate": {"type": "number", "minimum": 0, "maximum": 1},
+            "minimum_annotation_eligible_rate": {"type": "number", "minimum": 0, "maximum": 1},
+            "maximum_ambiguous_mapping_rate": {"type": "number", "minimum": 0, "maximum": 1},
+            "require_taxon_consistency": {"type": "boolean"},
+            "require_assembly_consistency": {"type": "boolean"}
+          }
+        },
+        "failure_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["unmatched", "multiple_matches", "taxon_conflict", "assembly_conflict"],
+          "properties": {
+            "unmatched": {"type": "string", "const": "unresolved"},
+            "multiple_matches": {"type": "string", "const": "resolved_multiple"},
+            "taxon_conflict": {"type": "string", "const": "unresolved_taxon"},
+            "assembly_conflict": {"type": "string", "const": "unresolved_assembly"}
+          }
+        }
+      }
+    },
+    "decision_reason": {"type": "string", "minLength": 1},
+    "rejected_hypotheses": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "required_resources": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}

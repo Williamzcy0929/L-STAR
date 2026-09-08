@@ -140,7 +140,7 @@ Pass these options to `l_star()`:
 | `top_k=5` | Set how many top-ranked methods enter consensus; cutoff ties are included. |
 | `selection_mode="manual", model_names=["GraphST", "SpaGCN"]` | Select consensus methods explicitly. Both arguments are needed. |
 | `k_mode="fixed", fixed_k=7` | Set the number of consensus domains. Both arguments are needed. |
-| `model_name="your-model-name"` | Select the LLM. |
+| `model_name="your-model-name"` | Select the LLM (OpenAI models only). |
 | `api_key="your-api-key"` | Supply a key instead of using `OPENAI_API_KEY`. |
 | `force_rerun=True` | Recompute comparisons instead of using cached results. |
 
